@@ -2,7 +2,8 @@
 
 int waterServePins[8];//22,24,26...36
 int readLickPins[8];//23,25,27...37
-int waterServeMills[8] = {15, 19, 19, 20, 20, 20, 20, 20};  int* p_waterServeMills = waterServeMills;
+int waterServeMicros[8] = {15000, 19000, 19000, 20000, 20000, 20000, 20000, 20000};      int* p_waterServeMicros = waterServeMicros;
+
 int INTERRUPTPINS[] = {2, 3, 21, 20, 19, 18};
 int INFARREDDETCETPIN = 49;
 int PRESSLEVERPIN = 48;
@@ -20,6 +21,8 @@ int water_flush = 0;                  int* p_water_flush = &water_flush;
 int lick_count[8];                    int* p_lick_count = lick_count;
 int waterserving = 0;
 
+int INDEBUGMODE = 0;                  int* p_INDEBUGMODE = &INDEBUGMODE;
+
 int tempLickPos = -1;
 int tempTrialStautsMark = -1;
 int lickEndThresholdMills = -1;
@@ -27,13 +30,14 @@ int lickEndThresholdMills = -1;
 byte receivedData[256];
 int indexInSerial = 0;
 bool isRecording = false;
+bool plainTextMark = false;
 //                        0           1            2             3            4             5           6           7                   8                      9      
-int* pointer_array[]={p_lick_mode, p_trial, p_trial_set, p_now_pos, p_lick_rec_pos, p_water_flush};
-int* pointerArrayType_array[]={p_waterServeMills, p_lick_count};
-int  pointerArrayType_arrayLength[]={8};
-String serial_print_type[]={"lick", "entrance", "press", "context_info", "log", "echo", "value_change", "command"};
+int* pointer_array[]={p_lick_mode, p_trial, p_trial_set, p_now_pos, p_lick_rec_pos, p_water_flush, p_INDEBUGMODE};
+int* pointerArrayType_array[]={p_waterServeMicros, p_lick_count};
+int  pointerArrayType_arrayLength[]={8, 8};
+String serial_print_type[]={"lick", "entrance", "press", "context_info", "log", "echo", "value_change", "command", "debugLog"};
 
-DueTimer myTimer = Timer.getAvailable();
+DueTimer pumpTimer = Timer.getAvailable();
 
 int active_pin=-1;
 
@@ -46,13 +50,7 @@ void SerialLog(String inputStr, String input_head=""){//"xxx"
   byte temp_buffer[256];
   int temp_length=stringToByteArray("log:"+input_head+inputStr, temp_buffer);
   Serial.write(temp_buffer, temp_length);
-}
-
-void serial_send(String inputStr){//"context_info:xxx" or ...
-  byte temp_buffer[256];
-  int temp_length=stringToByteArray(inputStr, temp_buffer);
-  Serial.write(temp_buffer, temp_length);
-  Serial.println();
+  Serial.flush();
 }
 
 void serial_send(byte inputArr[], int _length){
@@ -60,31 +58,42 @@ void serial_send(byte inputArr[], int _length){
   Serial.println();
 }
 
-void pump_set(int pump_pin, int mills, bool write_mode=true){//write_mode: true:冲突则不设， false:冲突则覆盖
+void serial_send(String inputStr){//"context_info:xxx" or ...
+  byte temp_buffer[256];
+  int temp_length=stringToByteArray(inputStr, temp_buffer);
+  serial_send(temp_buffer, temp_length);
+  // Serial.flush();
+  Serial.println();
+}
+
+void pump_set(int pump_pin, int micros, bool write_mode=true){//write_mode: true:冲突则不设， false:冲突则覆盖
   if(pump_pin==active_pin && write_mode){
     //serial_send("log:pump set while pumping");
     return;
   }
   if(active_pin!=-1 && pump_pin!=active_pin){return;}//不允许当前timer在活动时设置其他针脚
-  serial_send("log:pump set at "+String(pump_pin)+" lasting "+String(mills));
+  // serial_send("debugLog:pump set at "+String(pump_pin)+" lasting "+String(mills));
+  
   digitalWrite(pump_pin, HIGH);
+  digitalWrite(13, HIGH);
   active_pin=pump_pin;
-  myTimer.attachInterrupt(pump_set_call_by_interrupt).start(mills);
+  pumpTimer.attachInterrupt(pump_set_call_by_interrupt).start(micros);
   // MsTimer2::set(mills, pump_set_call_by_interrupt);
   // MsTimer2::start();
 }
 
-void pump_set_all(int mills, bool write_mode=false){//write_mode: true:冲突则不设， false:冲突则覆盖
+void pump_set_all(int micros, bool write_mode=false){//write_mode: true:冲突则不设， false:冲突则覆盖
   for(int i=0; i<Length(waterServePins); i++){
     digitalWrite(waterServePins[i], HIGH);
   }
   active_pin = -2;
-  myTimer.attachInterrupt(pump_set_call_by_interrupt).start(mills);
+  pumpTimer.attachInterrupt(pump_set_call_by_interrupt).start(micros);
   // MsTimer2::set(mills, pump_set_call_by_interrupt);
   // MsTimer2::start();
 }
 
 void pump_set_call_by_interrupt(){
+  // serial_send("debugLog:pump finish in timer");
   if(active_pin == -2){
     for(int i=0; i<Length(waterServePins); i++){
     digitalWrite(waterServePins[i], LOW);
@@ -93,12 +102,14 @@ void pump_set_call_by_interrupt(){
     digitalWrite(active_pin, LOW);
   }
   active_pin=-1;
-  myTimer.stop();
-  // MsTimer2::stop();
+  digitalWrite(13, LOW);
+  pumpTimer.stop();
 }
 
 void LickReportInInterrupt(){
   for (int i = 0; i < Length(readLickPins); i++) {
+    // Serial.print(i);
+    // Serial.println(digitalRead(readLickPins[i]));
     if(digitalRead(readLickPins[i]) == LICK_ACTIVE){
       serial_send("lick:" + String(i)+":"+String(trial));
       lick_count[i]++;
@@ -123,16 +134,31 @@ void print_status(String _head=""){
   // //                          0           1          2           3             4             5           6           7                   8                      9      
   // int* pointer_array[]={p_lick_mode, p_trial, p_trial_set, p_now_pos, p_lick_rec_pos, p_water_flush};
   char *log_buffer = new char[256];
-  sprintf(log_buffer, " lick_mode %d, trial %d, trial_set %d, now_pos %d, water_serve_mode %d waiting %d",
-                        lick_mode, trial, trial_set, now_pos, water_flush, waiting);
-  String temp_log = "log:"+ _head+ log_buffer;
-  temp_log += " lick_count: ";
+  sprintf(log_buffer, " lick_mode %d, trial %d, trial_set %d, now_pos %d, water_serve_mode %d waiting %d INDEBUGMODE %d" ,
+                        lick_mode, trial, trial_set, now_pos, water_flush, waiting, INDEBUGMODE);
+  String temp_log = "debugLog:"+ _head+ log_buffer;
+  
+  serial_send(temp_log);
+  delete log_buffer;
+}
+
+void print_ArrayStatus(String _head=""){
+  // //                          0           1          2           3             4             5           6           7                   8                      9      
+  // int* pointer_array[]={p_lick_mode, p_trial, p_trial_set, p_now_pos, p_lick_rec_pos, p_water_flush};
+  String temp_log = "waterServeMicros: ";
+  for(int i =0; i < Length(waterServeMicros); i++){
+    temp_log += String(waterServeMicros[i]);
+    if(i<7){temp_log += ", ";}
+  }
+
+  temp_log += "; lick_count: ";
   for(int i =0; i < 8; i++){
     temp_log += String(lick_count[i]);
     if(i<7){temp_log += ", ";}
   }
+  
+  temp_log = "debugLog:"+ _head+ temp_log;
   serial_send(temp_log);
-  delete log_buffer;
 }
 
 size_t stringToByteArray(String inputStr, byte* outputArray) {//return full length of byte_array
@@ -165,8 +191,8 @@ size_t stringToByteArray(String inputStr, byte* outputArray) {//return full leng
 }
 
 String ByteArrayToCommand(byte byte_array[], int arraySize){//要求无前后补位
-  //    0         1            2           3            4
-  //{"move", "context_info", "log", "value_change", "command"};
+  //    0         1         2           3           4       5           6            7          8
+  //{"lick", "entrance", "press", "context_info", "log", "echo", "value_change", "command", "debugLog"};
 
   ////type: 2byte   length: 1byte    content: ...
   //type: 1yte   length: 1byte    content: ...
@@ -197,14 +223,16 @@ String ByteArrayToCommand(byte byte_array[], int arraySize){//要求无前后补
 }
 
 int TrialStart(){
+  // serial_send("debugLog:trial start");
   waiting = 0;
   for(int i =0; i<Length(lick_count); i++){
     lick_count[i] = 0;
   }
   if(lick_mode==0){
     if(trial_set == 1){
-      pump_set(waterServePins[now_pos], waterServeMills[now_pos]);
+      pump_set(waterServePins[now_pos], waterServeMicros[now_pos]);
       trial_set = 0;
+
     }
   }
   //print_status("In trial start:");
@@ -230,7 +258,7 @@ void init_by_PC(bool init_all = false){
   SerialLog("initialed");
 }
 
-void command_parse(String _command){
+void commandParse(String _command){
   // // Serial.print("in parse: ");
   // // Serial.print(_command);
   // Serial.println();
@@ -241,6 +269,7 @@ void command_parse(String _command){
   // Serial.println(_command);
   // Serial.println(_command.compareTo("check"));
   if(_command.compareTo("check")==0){print_status();}
+  if(_command.compareTo("checkArray")==0){print_ArrayStatus();}
   else if(_command.compareTo("init")==0) {init_by_PC();}
   else{
     int equal_pos=_command.indexOf('=');
@@ -256,25 +285,38 @@ void command_parse(String _command){
             serial_send("log:invalid message!");
             return;
           }
-          *(pointerArrayType_array[input_ArrVar]+sizeof(int)*input_ArrInd)=input_value;
+          *(pointerArrayType_array[input_ArrVar] + input_ArrInd)=input_value;
           Serial.println("echo:"+_command+":echo");
-          serial_send("echo:"+_command+":echo");
+          Serial.println(input_value);
+          // serial_send("echo:"+_command+":echo");
+          if(INDEBUGMODE > 0){
+            Serial.flush();
+            print_ArrayStatus();
+            Serial.flush();
+          }
         }else{
           serial_send("log:invalid message!");
           return;
         }
       }else{// normal variable change
-        //serial_send("log:in parse:"+_command);
+        //serial_send("debugLog:in parse:"+_command);
 
         int input_var=(_command.substring(0, equal_pos)).toInt();
         int input_value=(_command.substring(equal_pos+1)).toInt();
         if(input_var>=0 && input_var<sizeof(pointer_array)){
           *(pointer_array[input_var])=input_value;
           Serial.println("echo:"+_command+":echo");
-          serial_send("echo:"+_command+":echo");
+          // serial_send("echo:"+_command+":echo");
           //pump_set(23, 100);
+          if(INDEBUGMODE > 0){
+            Serial.flush();
+            print_status();
+            Serial.flush();
+          }
           if(pointer_array[input_var] == p_trial_set){
             tempTrialStautsMark = input_value;
+            //serial_send("debugLog:trialStatusMark="+String(tempTrialStautsMark));
+            
             //serial_send("log:received, now tempTrialStautsMark = "+String(tempTrialStautsMark));
           }
         }
@@ -293,7 +335,7 @@ void setup() {
   water_flush = 0;                                     
   waterserving = 0;
 
-  // myTimer = Timer.getAvailable(); 
+  // pumpTimer = Timer.getAvailable(); 
 
   for(int i = 0; i < 8; i ++){
     readLickPins[i] = 23 + i*2;
@@ -306,27 +348,20 @@ void setup() {
     digitalWrite(waterServePins[i], LOW);
 
   }
-  for(int i = 0; i < 8; i ++){
-
-  attachInterrupt(digitalPinToInterrupt(readLickPins[i]), LickReportInInterrupt, RISING);
-  // attachInterrupt(digitalPinToInterrupt(25), LickReportInInterrupt, RISING);
-  // attachInterrupt(digitalPinToInterrupt(27), LickReportInInterrupt, RISING);
-  // attachInterrupt(digitalPinToInterrupt(29), LickReportInInterrupt, RISING);
+  for(int i = 0; i < 2; i ++){//全部加下拉地
+    attachInterrupt(digitalPinToInterrupt(readLickPins[i]), LickReportInInterrupt, RISING);
   }
 
-
-  // for(int i = 0; i < 5; i++){
-  //   pinMode(INTERRUPTPINS[i], INPUT);
-  //   attachInterrupt(i, LickReportInInterrupt, RISING);
-  // }
-    attachInterrupt(digitalPinToInterrupt(3), InfraRedInReportInInterrupt, FALLING);
-    attachInterrupt(digitalPinToInterrupt(4), InfraRedLeaveReportInInterrupt, RISING);
-    attachInterrupt(digitalPinToInterrupt(5), PressLeverReportInInterrupt, FALLING);
+  attachInterrupt(digitalPinToInterrupt(3), InfraRedInReportInInterrupt, FALLING);
+  attachInterrupt(digitalPinToInterrupt(4), InfraRedLeaveReportInInterrupt, RISING);
+  attachInterrupt(digitalPinToInterrupt(5), PressLeverReportInInterrupt, FALLING);
 
 
+  pinMode(13, OUTPUT);
   pinMode(50, OUTPUT);
   pinMode(INFARREDDETCETPIN, INPUT);
   pinMode(PRESSLEVERPIN, INPUT);
+  digitalWrite(13, LOW);
   digitalWrite(50, HIGH);
   digitalWrite(INFARREDDETCETPIN, HIGH);
   digitalWrite(PRESSLEVERPIN, HIGH);
@@ -347,15 +382,21 @@ void loop() {
 
   if(tempTrialStautsMark != -1){//trial status update
     //serial_send("checking");
+    // serial_send("debugLog:trialStatusMark="+String(tempTrialStautsMark));
     if(tempTrialStautsMark == 1){//start
       TrialStart();
+      // serial_send("debugLog:trial start");
+
     }else { 
       if(tempTrialStautsMark == 2){//serve water and end
-        pump_set(waterServePins[now_pos], waterServeMills[now_pos]);
+        pump_set(waterServePins[now_pos], waterServeMicros[now_pos]);
         TrialEnd();
+        // serial_send("debugLog:trial end");
+
       }
       else if(tempTrialStautsMark == 0){//end
         TrialEnd();
+        // serial_send("debugLog:trial end, no water");
       }
     }
     tempTrialStautsMark = -1;
@@ -395,24 +436,24 @@ void loop() {
     if (!isRecording && inByte == 0xAA) {
       isRecording = true;
     }else if (!isRecording) {
-      Serial.println(inByte);
-      if(inByte == 0x2F){
-        byte secondInByte = (byte)Serial.read();
-        if(secondInByte == 0x2F){
-          Serial.println("received: //");
-          //Serial.println(Serial.readString());
-          command_parse(Serial.readString());
+      if (inByte == 0x2f){
+        if(!plainTextMark){plainTextMark = true;}
+        else{
+          // String tempCommand = Serial.readString();
+          // Serial.println("received:" + tempCommand);
+          // commandParse(tempCommand);
+          commandParse(Serial.readString());
+          plainTextMark = false;
           break;
-        }else {
-          receivedData[indexInSerial++] = secondInByte;
         }
       }
     }
 
+
     // 如果在记录模式下
     if (isRecording) {
       if (inByte == 0xDD) {
-        command_parse(ByteArrayToCommand(receivedData, indexInSerial));
+        commandParse(ByteArrayToCommand(receivedData, indexInSerial));
         isRecording = false; // 结束记录
         indexInSerial = 0; // 重置索引
         break;
