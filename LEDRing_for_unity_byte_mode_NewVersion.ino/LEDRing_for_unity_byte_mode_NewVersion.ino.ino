@@ -1,8 +1,10 @@
 #include <DueTimer.h>
 
+#define macro
+
 int waterServePins[8];//22,24,26...36
 int readLickPins[8];//23,25,27...37
-int waterServeMicros[8] = {15000, 19000, 19000, 20000, 20000, 20000, 20000, 20000};      int* p_waterServeMicros = waterServeMicros;
+int waterServeMicros[8] = {60000, 80000, 19000, 20000, 20000, 20000, 20000, 20000};      int* p_waterServeMicros = waterServeMicros;
 
 int INTERRUPTPINS[] = {2, 3, 21, 20, 19, 18};
 int INFARREDDETCETPIN = 49;
@@ -63,6 +65,7 @@ void serial_send(String inputStr){//"context_info:xxx" or ...
   int temp_length=stringToByteArray(inputStr, temp_buffer);
   serial_send(temp_buffer, temp_length);
   // Serial.flush();
+  // delete temp_buffer;
   Serial.println();
 }
 
@@ -106,18 +109,27 @@ void pump_set_call_by_interrupt(){
   pumpTimer.stop();
 }
 
-void LickReportInInterrupt(){
-  for (int i = 0; i < Length(readLickPins); i++) {
-    // Serial.print(i);
-    // Serial.println(digitalRead(readLickPins[i]));
-    if(digitalRead(readLickPins[i]) == LICK_ACTIVE){
-      serial_send("lick:" + String(i)+":"+String(trial));
-      lick_count[i]++;
-      return;
-    }
-  }
-  Serial.println("no signal");
-}
+// void LickReportInInterrupt(){
+//   for (int i = 0; i < Length(readLickPins); i++) {
+//     // Serial.print(i);
+//     // Serial.println(digitalRead(readLickPins[i]));
+//     if(digitalRead(readLickPins[i]) == LICK_ACTIVE){
+//       serial_send("lick:" + String(i)+":"+String(trial));
+//       lick_count[i]++;
+//       return;
+// }
+//   }
+//   Serial.println("no signal");
+// }
+
+void LickReportInInterrupt0(){serial_send("lick:" + String(0)+":"+String(trial));lick_count[0]++;return;}
+void LickReportInInterrupt1(){serial_send("lick:" + String(1)+":"+String(trial));lick_count[1]++;return;}
+void LickReportInInterrupt2(){serial_send("lick:" + String(2)+":"+String(trial));lick_count[2]++;return;}
+void LickReportInInterrupt3(){serial_send("lick:" + String(3)+":"+String(trial));lick_count[3]++;return;}
+void LickReportInInterrupt4(){serial_send("lick:" + String(4)+":"+String(trial));lick_count[4]++;return;}
+void LickReportInInterrupt5(){serial_send("lick:" + String(5)+":"+String(trial));lick_count[5]++;return;}
+void LickReportInInterrupt6(){serial_send("lick:" + String(6)+":"+String(trial));lick_count[6]++;return;}
+void LickReportInInterrupt7(){serial_send("lick:" + String(7)+":"+String(trial));lick_count[7]++;return;}
 
 void InfraRedInReportInInterrupt(){
   serial_send("entrance:"+String(trial)+":In");
@@ -348,9 +360,18 @@ void setup() {
     digitalWrite(waterServePins[i], LOW);
 
   }
-  for(int i = 0; i < 2; i ++){//全部加下拉地
-    attachInterrupt(digitalPinToInterrupt(readLickPins[i]), LickReportInInterrupt, RISING);
-  }
+
+  // for(int i = 0; i < Length(readLickPins); i ++){
+  //   attachInterrupt(digitalPinToInterrupt(readLickPins[i]), LickReportInInterrupt, RISING);
+  // }
+  attachInterrupt(digitalPinToInterrupt(readLickPins[0]), LickReportInInterrupt0, RISING);
+  attachInterrupt(digitalPinToInterrupt(readLickPins[1]), LickReportInInterrupt1, RISING);
+  attachInterrupt(digitalPinToInterrupt(readLickPins[2]), LickReportInInterrupt2, RISING);
+  attachInterrupt(digitalPinToInterrupt(readLickPins[3]), LickReportInInterrupt3, RISING);
+  // attachInterrupt(digitalPinToInterrupt(readLickPins[4]), LickReportInInterrupt4, RISING);
+  // attachInterrupt(digitalPinToInterrupt(readLickPins[5]), LickReportInInterrupt5, RISING);
+  // attachInterrupt(digitalPinToInterrupt(readLickPins[6]), LickReportInInterrupt6, RISING);
+  // attachInterrupt(digitalPinToInterrupt(readLickPins[7]), LickReportInInterrupt7, RISING);
 
   attachInterrupt(digitalPinToInterrupt(3), InfraRedInReportInInterrupt, FALLING);
   attachInterrupt(digitalPinToInterrupt(4), InfraRedLeaveReportInInterrupt, RISING);
