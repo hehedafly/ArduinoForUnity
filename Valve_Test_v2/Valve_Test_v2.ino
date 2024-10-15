@@ -1,10 +1,10 @@
-#define MEGA false
+#define MEGA true
 
 #if MEGA
-int TOUT[]={22, 24, 25, 27};
-int TIN[]={10, 33, 35, 37};
-int ManualOncePin = 21;
-int ManualStartPin = 20;
+int TOUT[]={22, 24, 26, 28};
+int TIN[]={45,46,47,48};
+int ManualOncePin = 41;
+int ManualStartPin = 39;
 #else
 int TOUT[]={4, 5, 6};
 int TIN[]={7, 8, 9};
@@ -15,7 +15,7 @@ int ManualStartPin = 2;
 bool waiting = false;
 bool waterServeAtOnce = false;
 bool bRunning = false;
-float serveMillis[] = {20, 20, 0, 0};
+float serveMillis[] = {20, 20, 20, 20};
 int TINStatus[] = {0, 0, 0, 0};
 int iTN = 100;
 int i=0;
@@ -51,10 +51,10 @@ void setup() {
 
   bRunning = false;
   #if MEGA
-  attachInterrupt(2, StartWaterAtOnce, FALLING);
-  attachInterrupt(3, StartWater, FALLING);
-  digitalWrite(21, HIGH);
-  digitalWrite(20, HIGH);
+  attachInterrupt(digitalPinToInterrupt(ManualOncePin), StartWaterAtOnce, FALLING);
+  attachInterrupt(digitalPinToInterrupt(ManualStartPin), StartWater, FALLING);
+  digitalWrite(ManualOncePin, HIGH);
+  digitalWrite(ManualStartPin, HIGH);
   #else
   attachInterrupt(0, StartWaterAtOnce, FALLING);
   attachInterrupt(1, StartWater, FALLING);

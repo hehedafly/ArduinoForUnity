@@ -1,10 +1,8 @@
 #include <DueTimer.h>
 
-#define macro
-
 int waterServePins[8];//22,24,26...36
 int readLickPins[8];//23,25,27...37
-int waterServeMicros[8] = {60000, 80000, 19000, 20000, 20000, 20000, 20000, 20000};      int* p_waterServeMicros = waterServeMicros;
+int waterServeMicros[8] = {18000, 18000, 18000, 18000, 20000, 20000, 20000, 20000};      int* p_waterServeMicros = waterServeMicros;
 
 int INTERRUPTPINS[] = {2, 3, 21, 20, 19, 18};
 int INFARREDDETCETPIN = 49;
@@ -75,14 +73,14 @@ void pump_set(int pump_pin, int micros, bool write_mode=true){//write_mode: true
     return;
   }
   if(active_pin!=-1 && pump_pin!=active_pin){return;}//不允许当前timer在活动时设置其他针脚
-  // serial_send("debugLog:pump set at "+String(pump_pin)+" lasting "+String(mills));
+  if(INDEBUGMODE > 0){
+    serial_send("debugLog:pump set at "+String(pump_pin)+" lasting "+String(micros));
+  }
   
   digitalWrite(pump_pin, HIGH);
   digitalWrite(13, HIGH);
   active_pin=pump_pin;
-  pumpTimer.attachInterrupt(pump_set_call_by_interrupt).start(micros);
-  // MsTimer2::set(mills, pump_set_call_by_interrupt);
-  // MsTimer2::start();
+  pumpTimer.start(micros);
 }
 
 void pump_set_all(int micros, bool write_mode=false){//write_mode: true:冲突则不设， false:冲突则覆盖
@@ -144,10 +142,10 @@ void PressLeverReportInInterrupt(){
 
 void print_status(String _head=""){
   // //                          0           1          2           3             4             5           6           7                   8                      9      
-  // int* pointer_array[]={p_lick_mode, p_trial, p_trial_set, p_now_pos, p_lick_rec_pos, p_water_flush};
+  // int* pointer_array[]={p_lick_mode, p_trial, p_trial_set, p_now_pos, p_lick_rec_pos, p_water_flush, p_INDEBUGMODE};
   char *log_buffer = new char[256];
-  sprintf(log_buffer, " lick_mode %d, trial %d, trial_set %d, now_pos %d, water_serve_mode %d waiting %d INDEBUGMODE %d" ,
-                        lick_mode, trial, trial_set, now_pos, water_flush, waiting, INDEBUGMODE);
+  sprintf(log_buffer, " lick_mode %d, trial %d, trial_set %d, now_pos %d, water_serve_mode %d INDEBUGMODE %d waiting %d" ,
+                        lick_mode, trial, trial_set, now_pos, water_flush, INDEBUGMODE, waiting);
   String temp_log = "debugLog:"+ _head+ log_buffer;
   
   serial_send(temp_log);
@@ -280,11 +278,15 @@ void commandParse(String _command){
   // Serial.println("in parse:");
   // Serial.println(_command);
   // Serial.println(_command.compareTo("check"));
+  int equal_pos=_command.indexOf('=');
   if(_command.compareTo("check")==0){print_status();}
-  if(_command.compareTo("checkArray")==0){print_ArrayStatus();}
+  else if(_command.compareTo("checkArray")==0){print_ArrayStatus();}
   else if(_command.compareTo("init")==0) {init_by_PC();}
+  else if(equal_pos>0 && _command.substring(0, equal_pos).compareTo("sw")==0){
+    int input_value=(_command.substring(equal_pos+1)).toInt();
+    pump_set(waterServePins[input_value], waterServeMicros[input_value]);
+  }
   else{
-    int equal_pos=_command.indexOf('=');
     int arrayStartIndc=_command.indexOf('[');//format: 1[2]=0
     int arrayEndIndc = _command.indexOf(']');
     if(equal_pos>0){
@@ -302,9 +304,9 @@ void commandParse(String _command){
           Serial.println(input_value);
           // serial_send("echo:"+_command+":echo");
           if(INDEBUGMODE > 0){
-            Serial.flush();
+            // Serial.flush();
             print_ArrayStatus();
-            Serial.flush();
+            // Serial.flush();
           }
         }else{
           serial_send("log:invalid message!");
@@ -321,9 +323,9 @@ void commandParse(String _command){
           // serial_send("echo:"+_command+":echo");
           //pump_set(23, 100);
           if(INDEBUGMODE > 0){
-            Serial.flush();
+            // Serial.flush();
             print_status();
-            Serial.flush();
+            // Serial.flush();
           }
           if(pointer_array[input_var] == p_trial_set){
             tempTrialStautsMark = input_value;
@@ -364,6 +366,7 @@ void setup() {
   // for(int i = 0; i < Length(readLickPins); i ++){
   //   attachInterrupt(digitalPinToInterrupt(readLickPins[i]), LickReportInInterrupt, RISING);
   // }
+  pumpTimer.attachInterrupt(pump_set_call_by_interrupt);
   attachInterrupt(digitalPinToInterrupt(readLickPins[0]), LickReportInInterrupt0, RISING);
   attachInterrupt(digitalPinToInterrupt(readLickPins[1]), LickReportInInterrupt1, RISING);
   attachInterrupt(digitalPinToInterrupt(readLickPins[2]), LickReportInInterrupt2, RISING);
