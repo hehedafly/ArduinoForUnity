@@ -2,11 +2,11 @@
 
 int waterServePins[8];//22,24,26...36
 int readLickPins[8];//23,25,27...37
-int waterServeMicros[8] = {18000, 18000, 18000, 18000, 20000, 20000, 20000, 20000};      int* p_waterServeMicros = waterServeMicros;
+int waterServeMicros[8] = {20000, 20000, 20000, 20000, 20000, 20000, 20000, 20000};      int* p_waterServeMicros = waterServeMicros;
 
-int INTERRUPTPINS[] = {2, 3, 21, 20, 19, 18};
-int INFARREDDETCETPIN = 49;
-int PRESSLEVERPIN = 48;
+const int INFARREDDETCETPIN = 49;
+const int PRESSLEVERPIN = 48;
+const int OGOUTPIN = 40;
 
 int LICK_ACTIVE = HIGH;
 int LICK_SILENCE = LOW;
@@ -19,6 +19,7 @@ int now_pos = -1;                     int* p_now_pos = &now_pos;//只管给水�
 int lick_rec_pos = -1;                int* p_lick_rec_pos = &lick_rec_pos;
 int water_flush = 0;                  int* p_water_flush = &water_flush;
 int lick_count[8];                    int* p_lick_count = lick_count;
+int OGActiveMills = 100;              int* p_OGActiveMills = &OGActiveMills;
 int waterserving = 0;
 
 int INDEBUGMODE = 0;                  int* p_INDEBUGMODE = &INDEBUGMODE;
@@ -32,12 +33,13 @@ int indexInSerial = 0;
 bool isRecording = false;
 bool plainTextMark = false;
 //                        0           1            2             3            4             5           6           7                   8                      9      
-int* pointer_array[]={p_lick_mode, p_trial, p_trial_set, p_now_pos, p_lick_rec_pos, p_water_flush, p_INDEBUGMODE};
+int* pointer_array[]={p_lick_mode, p_trial, p_trial_set, p_now_pos, p_lick_rec_pos, p_water_flush, p_INDEBUGMODE, p_OGActiveMills};
 int* pointerArrayType_array[]={p_waterServeMicros, p_lick_count};
 int  pointerArrayType_arrayLength[]={8, 8};
 String serial_print_type[]={"lick", "entrance", "press", "context_info", "log", "echo", "value_change", "command", "debugLog"};
 
 DueTimer pumpTimer = Timer.getAvailable();
+DueTimer OGTimer = Timer.getAvailable();
 
 int active_pin=-1;
 
@@ -80,7 +82,7 @@ void pump_set(int pump_pin, int micros, bool write_mode=true){//write_mode: true
   digitalWrite(pump_pin, HIGH);
   digitalWrite(13, HIGH);
   active_pin=pump_pin;
-  pumpTimer.start(micros);
+  pumpTimer.attachInterrupt(pump_set_call_by_interrupt).start(micros);
 }
 
 void pump_set_all(int micros, bool write_mode=false){//write_mode: true:冲突则不设， false:冲突则覆盖
@@ -89,12 +91,11 @@ void pump_set_all(int micros, bool write_mode=false){//write_mode: true:冲突�
   }
   active_pin = -2;
   pumpTimer.attachInterrupt(pump_set_call_by_interrupt).start(micros);
-  // MsTimer2::set(mills, pump_set_call_by_interrupt);
-  // MsTimer2::start();
+
 }
 
 void pump_set_call_by_interrupt(){
-  // serial_send("debugLog:pump finish in timer");
+  if(INDEBUGMODE > 0){serial_send("debugLog:pump finish in timer");}
   if(active_pin == -2){
     for(int i=0; i<Length(waterServePins); i++){
     digitalWrite(waterServePins[i], LOW);
@@ -105,6 +106,26 @@ void pump_set_call_by_interrupt(){
   active_pin=-1;
   digitalWrite(13, LOW);
   pumpTimer.stop();
+}
+
+void OG_set(){//write_mode: true:冲突则不设， false:冲突则覆盖
+  if(INDEBUGMODE > 0){
+    serial_send("debugLog:OG set at "+String(OGOUTPIN)+" lasting "+String(OGActiveMills));
+  }
+  
+  if(OGActiveMills > 0){
+    digitalWrite(OGOUTPIN, HIGH);
+    OGTimer.attachInterrupt(OG_set_call_by_interrupt).start(OGActiveMills*1000);
+  }else {
+    digitalWrite(OGOUTPIN, LOW);
+    OGTimer.stop();
+  }
+}
+
+void OG_set_call_by_interrupt(){
+  if(INDEBUGMODE > 0){serial_send("debugLog:OG finish in timer");}
+  digitalWrite(OGOUTPIN, LOW);
+  OGTimer.stop();
 }
 
 // void LickReportInInterrupt(){
@@ -204,7 +225,6 @@ String ByteArrayToCommand(byte byte_array[], int arraySize){//要求无前后补
   //    0         1         2           3           4       5           6            7          8
   //{"lick", "entrance", "press", "context_info", "log", "echo", "value_change", "command", "debugLog"};
 
-  ////type: 2byte   length: 1byte    content: ...
   //type: 1yte   length: 1byte    content: ...
   // int temp_type = ((int)byte_array[1])*8 + (int)byte_array[0];
   // int temp_length = byte_array[2];
@@ -239,7 +259,7 @@ int TrialStart(){
     lick_count[i] = 0;
   }
   if(lick_mode==0){
-    if(trial_set == 1){
+    if(trial_set == 1 && now_pos != -1){
       pump_set(waterServePins[now_pos], waterServeMicros[now_pos]);
       trial_set = 0;
 
@@ -320,18 +340,14 @@ void commandParse(String _command){
         if(input_var>=0 && input_var<sizeof(pointer_array)){
           *(pointer_array[input_var])=input_value;
           Serial.println("echo:"+_command+":echo");
-          // serial_send("echo:"+_command+":echo");
-          //pump_set(23, 100);
+
           if(INDEBUGMODE > 0){
-            // Serial.flush();
             print_status();
-            // Serial.flush();
           }
           if(pointer_array[input_var] == p_trial_set){
             tempTrialStautsMark = input_value;
-            //serial_send("debugLog:trialStatusMark="+String(tempTrialStautsMark));
-            
-            //serial_send("log:received, now tempTrialStautsMark = "+String(tempTrialStautsMark));
+          }else if(pointer_array[input_var] == p_OGActiveMills){
+            OG_set();
           }
         }
       }
@@ -367,10 +383,12 @@ void setup() {
   //   attachInterrupt(digitalPinToInterrupt(readLickPins[i]), LickReportInInterrupt, RISING);
   // }
   pumpTimer.attachInterrupt(pump_set_call_by_interrupt);
+  OGTimer.attachInterrupt(OG_set_call_by_interrupt);
+  
   attachInterrupt(digitalPinToInterrupt(readLickPins[0]), LickReportInInterrupt0, RISING);
-  attachInterrupt(digitalPinToInterrupt(readLickPins[1]), LickReportInInterrupt1, RISING);
-  attachInterrupt(digitalPinToInterrupt(readLickPins[2]), LickReportInInterrupt2, RISING);
-  attachInterrupt(digitalPinToInterrupt(readLickPins[3]), LickReportInInterrupt3, RISING);
+  // attachInterrupt(digitalPinToInterrupt(readLickPins[1]), LickReportInInterrupt1, RISING);
+  // attachInterrupt(digitalPinToInterrupt(readLickPins[2]), LickReportInInterrupt2, RISING);
+  // attachInterrupt(digitalPinToInterrupt(readLickPins[3]), LickReportInInterrupt3, RISING);
   // attachInterrupt(digitalPinToInterrupt(readLickPins[4]), LickReportInInterrupt4, RISING);
   // attachInterrupt(digitalPinToInterrupt(readLickPins[5]), LickReportInInterrupt5, RISING);
   // attachInterrupt(digitalPinToInterrupt(readLickPins[6]), LickReportInInterrupt6, RISING);
@@ -383,10 +401,12 @@ void setup() {
 
   pinMode(13, OUTPUT);
   pinMode(50, OUTPUT);
+  pinMode(OGOUTPIN, OUTPUT);
   pinMode(INFARREDDETCETPIN, INPUT);
   pinMode(PRESSLEVERPIN, INPUT);
   digitalWrite(13, LOW);
   digitalWrite(50, HIGH);
+  digitalWrite(OGOUTPIN, LOW);
   digitalWrite(INFARREDDETCETPIN, HIGH);
   digitalWrite(PRESSLEVERPIN, HIGH);
 
@@ -412,7 +432,7 @@ void loop() {
       // serial_send("debugLog:trial start");
 
     }else { 
-      if(tempTrialStautsMark == 2){//serve water and end
+      if(tempTrialStautsMark == 2 && now_pos != -1){//serve water and end
         pump_set(waterServePins[now_pos], waterServeMicros[now_pos]);
         TrialEnd();
         // serial_send("debugLog:trial end");

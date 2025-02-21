@@ -1,4 +1,4 @@
-#include <ADNS3080.h>
+// #include <ADNS3080.h>
 #include <MsTimer2.h>
 
 #define read_lick_Pin 49
@@ -38,6 +38,8 @@ int lick_mode0_delay=0;           int* p_lick_mode0_delay = &lick_mode0_delay;
 int lick_mode1_delay=0;           int* p_lick_mode1_delay = &lick_mode1_delay;//设定给水最低间隔,设为负数则停止舔舐给水，-2时给水并恢复至-1
 int trial=0;                      int* p_trial = &trial;
 
+int length = 0;
+
 // String inputString = "";      // a String to hold incoming data
 // bool stringComplete = false;
 byte receivedData[256];
@@ -49,9 +51,14 @@ String serial_print_type[]={"move", "context_info", "log", "echo", "value_change
 
 int active_pin=-1;
 
-ADNS3080 <PIN_RESET, PIN_CS> sensor;
-float sensorRefreshTime = 1000*60*10;//10min reset一次
-float sensorResetMillsNow = 0;
+// ADNS3080 <PIN_RESET, PIN_CS> sensor;
+// float sensorRefreshTime = 1000*60*10;//10min reset一次
+// float sensorResetMillsNow = 0;
+
+void CalcLengthCallByInterrupt(){
+  length += digitalRead(23) - digitalRead(25);
+  // length = digitalRead(23);
+}
 
 void SerialLog(String inputStr, String input_head=""){//"xxx"
   byte temp_buffer[256];
@@ -94,8 +101,8 @@ void init_by_PC(bool init_all = false){
   water_flush = 0;       
   lick_count = 0;        
   lick_count_max=0;
-  sensor.reset();
-  sensor.setup();
+  // sensor.reset();
+  // sensor.setup();
   SerialLog("initialed");
   if(init_all){
     previousMillis = 0;
@@ -224,8 +231,9 @@ void setup() {
   digitalWrite(waterServePin, HIGH);
   digitalWrite(lickIndicatePin, LOW);
   //digitalWrite(read_lick_Pin, LICK_SILENCE);
-  sensor.reset();
-  sensor.setup();
+  // sensor.reset();
+  // sensor.setup();
+  attachInterrupt(digitalPinToInterrupt(2), CalcLengthCallByInterrupt, RISING);
   // initialize serial communications:
   Serial.begin(115200);
   delay(1);
@@ -235,21 +243,32 @@ void setup() {
 }
 
 void loop() {
-  int8_t dx, dy;      // Displacement since last function call
-  dx=0; dy=0;
-  sensor.displacement( &dx, &dy );
-  dx+=64;dy+=64;
-  if(dx!=64 || dy!=64){
-    byte move_buffer[32];
-    int temp_length = stringToByteArray("move:xy", move_buffer);
-    move_buffer[temp_length-3]=(byte)dx;
-    move_buffer[temp_length-2]=(byte)dy;
-    serial_send(move_buffer, temp_length);
-  }
-  if(dx ==0 && dy == 0 && millis() - sensorResetMillsNow >= sensorRefreshTime){
-    sensor.reset();
-    sensor.setup();
-    sensorResetMillsNow = millis();
+  // int8_t dx, dy;      // Displacement since last function call
+  // dx=0; dy=0;
+  // sensor.displacement( &dx, &dy );
+  // dx+=64;dy+=64;
+  // if(dx!=64 || dy!=64){
+  //   byte move_buffer[32];
+  //   int temp_length = stringToByteArray("move:xy", move_buffer);
+  //   move_buffer[temp_length-3]=(byte)dx;
+  //   move_buffer[temp_length-2]=(byte)dy;
+  //   serial_send(move_buffer, temp_length);
+  // }
+  // if(dx ==0 && dy == 0 && millis() - sensorResetMillsNow >= sensorRefreshTime){
+  //   sensor.reset();
+  //   sensor.setup();
+  //   sensorResetMillsNow = millis();
+  // }
+  if(length != 0){
+    if(abs(length) < 16){
+      byte move_buffer[32];
+      int temp_length = stringToByteArray("move:xy", move_buffer);
+      move_buffer[temp_length-3]=(byte)(length + 64);
+      move_buffer[temp_length-2]=(byte)0;
+      serial_send(move_buffer, temp_length);
+    }
+    // Serial.print(length);
+    length = 0;
   }
 
   if (enter_reward_context>0) {
