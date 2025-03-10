@@ -7,6 +7,8 @@ int waterServeMicros[8] = {20000, 20000, 20000, 20000, 20000, 20000, 20000, 2000
 const int INFARREDDETCETPIN = 49;
 const int PRESSLEVERPIN = 48;
 const int OGOUTPIN = 40;
+const int SINGNALOUTPINS[8];
+const int SINGNALINPUTPINS[8];
 
 int LICK_ACTIVE = HIGH;
 int LICK_SILENCE = LOW;
@@ -29,6 +31,7 @@ int tempTrialStautsMark = -1;
 int lickEndThresholdMills = -1;
 
 byte receivedData[256];
+String sendDataStr[];
 int indexInSerial = 0;
 bool isRecording = false;
 bool plainTextMark = false;
@@ -57,6 +60,7 @@ void SerialLog(String inputStr, String input_head=""){//"xxx"
 
 void serial_send(byte inputArr[], int _length){
   Serial.write(inputArr, _length);
+  Serial.flush();
   Serial.println();
 }
 
@@ -64,7 +68,7 @@ void serial_send(String inputStr){//"context_info:xxx" or ...
   byte temp_buffer[256];
   int temp_length=stringToByteArray(inputStr, temp_buffer);
   serial_send(temp_buffer, temp_length);
-  // Serial.flush();
+  Serial.flush();
   // delete temp_buffer;
   Serial.println();
 }
