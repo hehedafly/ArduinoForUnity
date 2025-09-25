@@ -10,11 +10,7 @@ const int PRESSLEVERPIN = 48;
 const int OGOUTPIN = 40;
 const int MSRECORDPIN = 41;
 const int SYNCINPUTPIN = 42;
-
-const int REACH = 1;
-const int LEAVE = 0;
-
-String VERSION = "V2.1";
+String VERSION = "V2";
 // const int SINGNALOUTPINS[8];
 // const int SINGNALINPUTPINS[8];
 
@@ -40,81 +36,23 @@ int tempTrialStautsMark = -1;
 int lickEndThresholdMills = -1;
 
 byte receivedData[512];
-// RingBuf<char, 2048> SendDataBuffer;
-// RingBuf<char, 2048> SendDataBufferSec;
+RingBuf<char, 1024> SendDataBuffer;
 // volatile RingBuf<String, 128> SyncDataBuffer;
 volatile bool SyncMark = false;
 int indexInSerial = 0;
 bool isRecording = false;
 bool plainTextMark = false;
-int maxMsgCountPerChunk = 20;
 //                        0           1            2             3            4             5           6           7                   8                      9      
 int* pointer_array[]={p_lick_mode, p_trial, p_trial_set, p_now_pos, p_lick_rec_pos, p_water_flush, p_INDEBUGMODE, p_OGActiveMills, p_miniscopeRecord};
 int* pointerArrayType_array[]={p_waterServeMicros, p_lick_count};
 int  pointerArrayType_arrayLength[]={8, 8};
 
 //                                  0         1          2           3            4      5          6             7          8          9       10              11  
-// const char* serial_print_type[]={"lick", "entrance", "press", "context_info", "log", "echo", "value_change", "command", "debugLog", "stay", "syncInfo", "miniscopeStart"};
-const char* serial_print_type[]={"li",      "en",       "pr",     "ci",          "log", "echo", "vc",           "cmd",     "debugLog", "st",    "si",       "ms"};
+const char* serial_print_type[]={"lick", "entrance", "press", "context_info", "log", "echo", "value_change", "command", "debugLog", "stay", "syncInfo", "miniscopeStart"};
 
 DueTimer pumpTimer = Timer.getAvailable();
 DueTimer OGTimer = Timer.getAvailable();
 volatile int active_pin=-1;
-
-class DoubleBuffer {
-private:
-    RingBuf<char, 1024> bufferA;
-    RingBuf<char, 1024> bufferB;
-    volatile RingBuf<char, 1024>* volatile writeBuffer;
-    volatile RingBuf<char, 1024>* volatile readBuffer;
-    volatile bool swapRequested;
-    
-public:
-    DoubleBuffer() : writeBuffer(&bufferA), readBuffer(&bufferB), swapRequested(false) {}
-    
-    bool push(const char* msg) {
-        noInterrupts();
-        RingBuf<char, 1024>* currentWrite = (RingBuf<char, 1024>*)writeBuffer;
-        interrupts();
-        
-        size_t len = strlen(msg);
-        len = min(len, (size_t)0xff);
-        int requiredSpace = len + 2;
-        
-        if (currentWrite->size() + requiredSpace > currentWrite->maxSize() * 0.8) {
-            swapRequested = true;  // 达到80%容量时请求交换
-        }
-        
-        if (currentWrite->size() + requiredSpace > currentWrite->maxSize()) {
-            return false;
-        }
-        
-        currentWrite->push((char)(len + 1));
-        for (size_t i = 0; i < len; i++) {
-            currentWrite->push(msg[i]);
-        }
-        currentWrite->push((char)0);
-        
-        return true;
-    }
-    
-    bool shouldSwap() const { return swapRequested; }
-    
-    void swap() {
-        noInterrupts();
-        volatile RingBuf<char, 1024>* temp = writeBuffer;
-        writeBuffer = readBuffer;
-        readBuffer = temp;
-        ((RingBuf<char, 1024>*)writeBuffer)->clear();
-        swapRequested = false;
-        interrupts();
-    }
-    
-    RingBuf<char, 1024>* getReadBuffer() { return (RingBuf<char, 1024>*)readBuffer; }
-    RingBuf<char, 1024>* getWriteBuffer() { return (RingBuf<char, 1024>*)writeBuffer; }
-};
-
-DoubleBuffer sendDataBuffers;
 
 template<class T>
 int Length(T& arr){
@@ -130,13 +68,20 @@ void SerialLog(String inputStr, String input_head=""){//"xxx"
 bool serial_sendRaw(byte inputArr[], int _length){
   size_t wl = Serial.write(inputArr, _length);
   Serial.println();
+  // Serial.print("wl:");
+  // Serial.print(wl);
+  // Serial.println();
+
   return wl == _length;
+  // Serial.println(_length);
 }
 
 bool serial_send(String inputStr){//"context_info:xxx" or ...
   byte temp_buffer[256];
   int temp_length=stringToByteArray(inputStr, temp_buffer);
   return serial_sendRaw(temp_buffer, temp_length);
+  // delete temp_buffer;
+  // delayMicroseconds(10);
 }
 
 void pump_set(int pump_pin, int micros, bool write_mode=true){//write_mode: true:冲突则不设， false:冲突则覆盖
@@ -146,10 +91,7 @@ void pump_set(int pump_pin, int micros, bool write_mode=true){//write_mode: true
   }
   if(active_pin!=-1 && pump_pin!=active_pin){return;}//不允许当前timer在活动时设置其他针脚
   if(INDEBUGMODE > 0){
-    char _content[sizeof("debugLog:pump set at x lasting xxxx") + 8] = "";
-    sprintf(_content, "debugLog:pump set at %d lasting %d", pump_pin, micros);
-    bufferPushChar(_content);
-    // serial_send("debugLog:pump set at "+String(pump_pin)+" lasting "+String(micros));
+    serial_send("debugLog:pump set at "+String(pump_pin)+" lasting "+String(micros));
   }
   
   digitalWrite(pump_pin, HIGH);
@@ -188,6 +130,7 @@ void OG_set(){//-1:持续, 0:关闭, 1+:持续mills
     char _content[sizeof("debugLog:OG set at lasting ") + 8] = "";
     sprintf(_content, "debugLog:OG set at %d lasting %d", OGOUTPIN, OGActiveMills);
     bufferPushChar(_content);
+    // bufferPushChar("debugLog:OG set at "+String(OGOUTPIN)+" lasting "+String(OGActiveMills));
   }
   
   if(OGActiveMills > 0){
@@ -215,16 +158,35 @@ void Sync_call_by_interrupt(){
   SyncMark = true;
 }
 
+// void LickReportInInterrupt(){
+//   for (int i = 0; i < Length(readLickPins); i++) {
+//     // Serial.print(i);
+//     // Serial.println(digitalRead(readLickPins[i]));
+//     if(digitalRead(readLickPins[i]) == LICK_ACTIVE){
+//       serial_send("lick:" + String(i)+":"+String(trial));
+//       lick_count[i]++;
+//       return;
+// }
+//   }
+//   Serial.println("no signal");
+// }
 
-void LickReportInInterrupt0(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 0, REACH);bufferPushChar(entry);lick_count[0]++;return;}
-void LickReportInInterrupt0_leave(){char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 0, LEAVE);bufferPushChar(entry);lick_count[0]++;return;}
-void LickReportInInterrupt1(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 1, REACH);bufferPushChar(entry);lick_count[1]++;return;}
-void LickReportInInterrupt2(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 2, REACH);bufferPushChar(entry);lick_count[2]++;return;}
-void LickReportInInterrupt3(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 3, REACH);bufferPushChar(entry);lick_count[3]++;return;}
-void LickReportInInterrupt4(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 4, REACH);bufferPushChar(entry);lick_count[4]++;return;}
-void LickReportInInterrupt5(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 5, REACH);bufferPushChar(entry);lick_count[5]++;return;}
-void LickReportInInterrupt6(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 6, REACH);bufferPushChar(entry);lick_count[6]++;return;}
-void LickReportInInterrupt7(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 7, REACH);bufferPushChar(entry);lick_count[7]++;return;}
+// void LickReportInInterrupt0(){serial_send("lick:" + String(0)+":"+String(trial));lick_count[0]++;return;}
+// void LickReportInInterrupt1(){serial_send("lick:" + String(1)+":"+String(trial));lick_count[1]++;return;}
+// void LickReportInInterrupt2(){serial_send("lick:" + String(2)+":"+String(trial));lick_count[2]++;return;}
+// void LickReportInInterrupt3(){serial_send("lick:" + String(3)+":"+String(trial));lick_count[3]++;return;}
+// void LickReportInInterrupt4(){serial_send("lick:" + String(4)+":"+String(trial));lick_count[4]++;return;}
+// void LickReportInInterrupt5(){serial_send("lick:" + String(5)+":"+String(trial));lick_count[5]++;return;}
+// void LickReportInInterrupt6(){serial_send("lick:" + String(6)+":"+String(trial));lick_count[6]++;return;}
+// void LickReportInInterrupt7(){serial_send("lick:" + String(7)+":"+String(trial));lick_count[7]++;return;}
+void LickReportInInterrupt0(){char entry[16];sprintf(entry, "lick:%d:%d", 0, trial);bufferPushChar(entry);lick_count[0]++;return;}
+void LickReportInInterrupt1(){char entry[16];sprintf(entry, "lick:%d:%d", 1, trial);bufferPushChar(entry);lick_count[1]++;return;}
+void LickReportInInterrupt2(){char entry[16];sprintf(entry, "lick:%d:%d", 2, trial);bufferPushChar(entry);lick_count[2]++;return;}
+void LickReportInInterrupt3(){char entry[16];sprintf(entry, "lick:%d:%d", 3, trial);bufferPushChar(entry);lick_count[3]++;return;}
+void LickReportInInterrupt4(){char entry[16];sprintf(entry, "lick:%d:%d", 4, trial);bufferPushChar(entry);lick_count[4]++;return;}
+void LickReportInInterrupt5(){char entry[16];sprintf(entry, "lick:%d:%d", 5, trial);bufferPushChar(entry);lick_count[5]++;return;}
+void LickReportInInterrupt6(){char entry[16];sprintf(entry, "lick:%d:%d", 6, trial);bufferPushChar(entry);lick_count[6]++;return;}
+void LickReportInInterrupt7(){char entry[16];sprintf(entry, "lick:%d:%d", 7, trial);bufferPushChar(entry);lick_count[7]++;return;}
 
 void InfraRedInReportInInterrupt(){
   char _content[sizeof("entrance::In") + 8] = "";
@@ -246,97 +208,64 @@ void PressLeverReportInInterrupt(){
 }
 
 bool bufferPushString(String strmsg){
-  return bufferPushChar(strmsg.c_str());
+  bufferPushChar(strmsg.c_str());
 }
 
-bool bufferPushChar(const char* msg) {
-    return sendDataBuffers.push(msg);
+bool bufferPushChar(const char* msg){
+  // Serial.print("in write:");
+  // Serial.print(msg);
+  // return false;
+  size_t len = strlen(msg);  // 包含终止符 '\0'
+  len = min(len, 0xff);
+  // Serial.println(len);
+  // Serial.print(strlen(msg));
+  // Serial.println(msg);
+  SendDataBuffer.push((char)(len + 1));      // 写入长度前缀
+  for(int i = 0; i < len; i++){
+    if(! SendDataBuffer.push(msg[i])){
+      return false;
+    }    // 写入实际数据
+  }
+  SendDataBuffer.push((char)0);
+  // Serial.print("now size:");
+  // Serial.println(SendDataBuffer.size());
+  return true;
 }
 
-// String bufferGetString() {
-//     noInterrupts();
-//     char _len;
-//     char _end = 'x';
-//     // 读取长度前缀
-//     if (!SendDataBuffer.Pop(_len)) {
-//         return ""; // 缓冲区空
-//     }
-//     int len = (int)_len;
-//     // 检查数据是否完整
-//     if (SendDataBuffer.size() < len) {
-//         Serial.print("error in read with length: ");
-//         Serial.println(len);
-//         return ""; // 数据不完整
-//     }
-//     // 检查结束符（索引为len-1）是否为0
-//     if (SendDataBuffer.Peek(_end, len - 1)) {
-//         if (_end != 0) {
-//             Serial.print("wrong end: ");
-//             Serial.println(_end);
-//             // 丢弃整个消息（弹出len字节）
-//             for (int i = 0; i < len; i++) {
-//                 char _t;
-//                 SendDataBuffer.Pop(_t);
-//             }
-//             return "";
-//         }
-//     } else {
-//         Serial.println("peek failed");
-//         return "";
-//     }
-//     // 读取数据
-//     char data[len];
-//     for (int i = 0; i < len; i++) {
-//         char _t;
-//         SendDataBuffer.Pop(_t);
-//         data[i] = _t;
-//     }
-//     // 确保字符串以null结尾（结束符已是0，所以直接转换）
-//     interrupts();
-//     return String(data);
-// }
-
-String bufferGetString(RingBuf<char, 1024>* buffer) {
+String bufferGetString(){
   char _len;
-  if (!buffer->pop(_len)) {
-      return "";
-  }
-  
+  char _end = 'x';
+  // Serial.print("in read: ");
+  // Serial.println(SendDataBuffer.size());
+  // SendDataBuffer.clear();
+  // return "test";
+
+  SendDataBuffer.lockedPop(_len);  // 读取长度前缀
   int len = (int)_len;
-  
-  // 快速合理性检查
-  if (len <= 0 || len > 100) {
-      // 损坏数据，清空缓冲区
-      buffer->clear();
+  // Serial.println(len);
+  if (SendDataBuffer.size() < len){
+    Serial.print("error in read with length");
+    Serial.println(len);
+
+    return "";  // 数据不完整
+  }
+  else if(SendDataBuffer.lockedPeek(_end, _len - 1)){
+    if(_end != 0){
+      Serial.print("wrong end: ");
+      Serial.println(_end);
       return "";
+    }
   }
   
-  if (buffer->size() < len - 1) {
-      // 数据不完整，恢复长度字节
-      buffer->push(_len);
-      return "";
+  char data[len-1];
+  for(int i = 0; i < len; i++){
+    char _t;
+    SendDataBuffer.lockedPop(_t);
+    data[i] = _t;
   }
-  
-  // 检查结束符
-  char _end;
-  buffer->peek(_end, len - 1);
-  if (_end != 0) {
-      // 损坏消息，丢弃
-      for (int i = 0; i < len; i++) {
-          char _t;
-          buffer->pop(_t);
-      }
-      return "";
-  }
-  
-  // 读取有效消息
-  char data[len];
-  for (int i = 0; i < len; i++) {
-      buffer->pop(data[i]);
-  }
-  
-  data[len - 1] = '\0';
-  return String(data);
+  // Serial.println(SendDataBuffer.size());
+
+  return data;
 }
 
 void print_status(String _head=""){
@@ -371,13 +300,21 @@ void print_ArrayStatus(String _head=""){
 }
 
 size_t stringToByteArray(String inputStr, byte* outputArray) {//return full length of byte_array
+    // Serial.print("in to array: ");
+
+    // Serial.println(inputStr);
+
   String typeStr = inputStr.substring(0, inputStr.indexOf(':'));
   String contentStr = inputStr.substring(inputStr.indexOf(':') + 1);
   uint16_t typeId = -1;
+  // for(int i=0; i<Length(serial_print_type); i++){
+  //   if(typeStr.equals(serial_print_type[i])){typeId=i;}
+  // }
   for (int i = 0; i < (sizeof(serial_print_type) / sizeof(serial_print_type[0])); i++) {
+    // 2. 使用 strcmp 比较 C 风格字符串
     if (strcmp(typeStr.c_str(), serial_print_type[i]) == 0) {
         typeId = i;
-        break;
+        break; // 找到后立即退出循环
     }
   }
 
@@ -386,8 +323,11 @@ size_t stringToByteArray(String inputStr, byte* outputArray) {//return full leng
 
   // 计算内容长度
   size_t contentLength = min(0xff, contentStr.length());
+  // Serial.print(contentStr);
+  // Serial.println(contentLength);
+  //outputArray[4] = contentLength & 0xFF;
   outputArray[2] = contentLength & 0xFF;
-  //以下index均减2
+//以下index均减2
   // 写入内容本身
   for (size_t i = 0; i < contentLength; ++i) {
     outputArray[3 + i] = (byte)contentStr[i];
@@ -418,10 +358,9 @@ String ByteArrayToCommand(byte byte_array[], int arraySize){//要求无前后补
     Serial.println();
     return "";}
   else{
-    char res[temp_length + 1];
+    char res[temp_length];
     memcpy(res, byte_array+2, temp_length);
-    res[temp_length] = '\0';
-    return res;
+    return String(res);
   }
 }
 
@@ -449,7 +388,7 @@ int TrialEnd(){
   return 1;
 }
 
-void init_by_PC(){
+void init_by_PC(bool init_all = false){
   waiting = 1;                      
   lick_mode = 0;                    
   trial=0;                          
@@ -458,28 +397,24 @@ void init_by_PC(){
   lick_rec_pos = -1;                
   water_flush = 0;                                     
   waterserving = 0;
-  serial_send("initialed manullay");
-
+  SerialLog("initialed");
 }
 
 void commandParse(String _command){
-
+  // // Serial.print("in parse: ");
+  // // Serial.print(_command);
+  // Serial.println();
+  //_command.replace("\r", "");
   _command.replace("\n", "");
+  
+  // Serial.println("in parse:");
+  // Serial.println(_command);
+  // Serial.println(_command.compareTo("check"));
   int equal_pos=_command.indexOf('=');
-  if(_command.compareTo("check") == 0){
-    print_status();
-    return;
-  }
-  if(_command.compareTo("checkArray")==0){
-    print_ArrayStatus();
-    return;
-  }
-  if(_command.compareTo("forceinit")==0){
-    init_by_PC();
-    return;
-  }
-
-  if(equal_pos>0 && _command.substring(0, equal_pos).compareTo("sw")==0){
+  if(_command.compareTo("check")==0){print_status();}
+  else if(_command.compareTo("checkArray")==0){print_ArrayStatus();}
+  else if(_command.compareTo("init")==0) {init_by_PC();}
+  else if(equal_pos>0 && _command.substring(0, equal_pos).compareTo("sw")==0){
     int input_value=(_command.substring(equal_pos+1)).toInt();
     pump_set(waterServePins[input_value], waterServeMicros[input_value]);
   }
@@ -493,13 +428,14 @@ void commandParse(String _command){
           int input_ArrInd=(_command.substring(arrayStartIndc+1, arrayEndIndc)).toInt();
           int input_value=(_command.substring(equal_pos+1)).toInt();
           if(input_ArrInd >= pointerArrayType_arrayLength[input_ArrVar]){
-            // serial_send("log:invalid message!");
+            serial_send("log:invalid message!");
             return;
           }
           *(pointerArrayType_array[input_ArrVar] + input_ArrInd)=input_value;
           char echoContent[256] = "";
           sprintf(echoContent, "echo:%s:echo", _command.c_str());
           Serial.println(echoContent);
+          // Serial.println(input_value);
           // serial_send("echo:"+_command+":echo");
           if(INDEBUGMODE > 0){
             // Serial.flush();
@@ -507,20 +443,18 @@ void commandParse(String _command){
             // Serial.flush();
           }
         }else{
-          // serial_send("log:invalid message!");
+          serial_send("log:invalid message!");
           return;
         }
       }else{// normal variable change
-        // serial_send("debugLog:in parse:<"+_command+">");
+        //serial_send("debugLog:in parse:"+_command);
 
         int input_var=(_command.substring(0, equal_pos)).toInt();
         int input_value=(_command.substring(equal_pos+1)).toInt();
-
         if(input_var>=0 && input_var<sizeof(pointer_array)){
           *(pointer_array[input_var])=input_value;
-          char echoContent[256] = "";
-          sprintf(echoContent, "echo:%s:echo", _command.c_str());
-          Serial.println(echoContent);
+          Serial.println("echo:"+_command+":echo");
+
           if(INDEBUGMODE > 0){
             print_status();
           }
@@ -548,18 +482,23 @@ void setup() {
   waterserving = 0;
   SyncMark = 0;
 
+  // pumpTimer = Timer.getAvailable(); 
+
   for(int i = 0; i < 8; i ++){
-    readLickPins[i] = 22 + i*2;
-    waterServePins[i] = 23 + i*2;
+    readLickPins[i] = 23 + i*2;
+    //attachInterrupt(digitalPinToInterrupt(readLickPins[i]), LickReportInInterrupt, RISING);
+    waterServePins[i] = 22 + i*2;
     
     pinMode(waterServePins[i], OUTPUT);
     pinMode(readLickPins[i], INPUT);
-    digitalWrite(readLickPins[i], HIGH);
-    // digitalWrite(readLickPins[i], LICK_SILENCE);
+    digitalWrite(readLickPins[i], LICK_SILENCE);
     digitalWrite(waterServePins[i], LOW);
 
   }
 
+  // for(int i = 0; i < Length(readLickPins); i ++){
+  //   attachInterrupt(digitalPinToInterrupt(readLickPins[i]), LickReportInInterrupt, RISING);
+  // }
   pumpTimer.attachInterrupt(pump_set_call_by_interrupt);
   OGTimer.attachInterrupt(OG_set_call_by_interrupt);
 
@@ -580,7 +519,7 @@ void setup() {
   
 
   attachInterrupt(digitalPinToInterrupt(readLickPins[0]), LickReportInInterrupt0, RISING);
-  attachInterrupt(digitalPinToInterrupt(readLickPins[1]), LickReportInInterrupt0_leave, FALLING);
+  attachInterrupt(digitalPinToInterrupt(readLickPins[1]), LickReportInInterrupt1, RISING);
   // // attachInterrupt(digitalPinToInterrupt(readLickPins[2]), LickReportInInterrupt2, RISING);
   // // attachInterrupt(digitalPinToInterrupt(readLickPins[3]), LickReportInInterrupt3, RISING);
   // // attachInterrupt(digitalPinToInterrupt(readLickPins[4]), LickReportInInterrupt4, RISING);
@@ -591,40 +530,34 @@ void setup() {
   // attachInterrupt(digitalPinToInterrupt(3), InfraRedInReportInInterrupt, FALLING);
   // attachInterrupt(digitalPinToInterrupt(5), InfraRedLeaveReportInInterrupt, RISING);
   // attachInterrupt(digitalPinToInterrupt(6), PressLeverReportInInterrupt, FALLING);
-  // attachInterrupt(digitalPinToInterrupt(SYNCINPUTPIN), Sync_call_by_interrupt, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(SYNCINPUTPIN), Sync_call_by_interrupt, CHANGE);
 
   Serial.begin(250000);
   Serial.println();
   Serial.println("initialed:" + VERSION);
   Serial.println();
+  SendDataBuffer.clear();
 }
 
 void loop() {
-
-  if (sendDataBuffers.shouldSwap()) {
-      sendDataBuffers.swap();
+  
+  while (!SendDataBuffer.isEmpty()) {
+    // Serial.print("test ");
+    // Serial.println(bufferGetString());
+    serial_send(bufferGetString());
   }
-  
-  // 处理读取缓冲区
-  RingBuf<char, 1024>* readBuffer = sendDataBuffers.getReadBuffer();
-  int _count = 0;
-  
-  while (!readBuffer->isEmpty() && _count < maxMsgCountPerChunk) {
-      String message = bufferGetString(readBuffer);
-      if (message.length() > 0) {
-          serial_send(message);
-          _count++;
-      }
-  }
-  
-  // 如果读取缓冲区空了且写入缓冲区有数据，主动交换
-  if (readBuffer->isEmpty() && !sendDataBuffers.getWriteBuffer()->isEmpty()) {
-      sendDataBuffers.swap();
+  if (SyncMark) {
+    // Serial.println(SyncMark);
+    while(!serial_send("syncInfo:1")){};
+    SyncMark = false;
   }
 
   if(tempTrialStautsMark != -1){//trial status update
+    //serial_send("checking");
+    // serial_send("debugLog:trialStatusMark="+String(tempTrialStautsMark));
     if(tempTrialStautsMark == 1){//start
       TrialStart();
+      // serial_send("debugLog:trial start");
 
     }else { 
       if(tempTrialStautsMark == 2 && now_pos != -1){//serve water and end
@@ -687,7 +620,7 @@ void loop() {
         indexInSerial = 0;
       }else{
         receivedData[indexInSerial++] = inByte; // 将字符添加到数组
-        // Serial.print(inByte);
+        //Serial.print(inByte);
       }
       
       // 防止数组越界

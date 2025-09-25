@@ -1,5 +1,6 @@
 #include <DueTimer.h>
 #include <RingBuf.h>
+#include <algorithm>
 
 int waterServePins[8];//22,24,26...36
 int readLickPins[8];//23,25,27...37
@@ -27,10 +28,10 @@ int trial=0;                          int* p_trial = &trial;
 int trial_set = 0;                    int* p_trial_set = &trial_set;//设为0时结束，设为1时开始, 设为2时按now_pos给水
 int now_pos = -1;                     int* p_now_pos = &now_pos;//只管给水，不管屏幕显示
 int lick_rec_pos = -1;                int* p_lick_rec_pos = &lick_rec_pos;
-int water_flush = 0;                  int* p_water_flush = &water_flush;
-int lick_count[8];                    int* p_lick_count = lick_count;
+int water_flush[8] = {};              int* p_water_flush = water_flush;
+int lick_count[8] = {};               int* p_lick_count = lick_count;
 int OGActiveMills = 100;              int* p_OGActiveMills = &OGActiveMills;
-int waterserving = 0;
+// int waterserving = 0;
 int miniscopeRecord = 0;              int* p_miniscopeRecord = &miniscopeRecord;
 
 int INDEBUGMODE = 0;                  int* p_INDEBUGMODE = &INDEBUGMODE;
@@ -49,8 +50,8 @@ bool isRecording = false;
 bool plainTextMark = false;
 int maxMsgCountPerChunk = 20;
 //                        0           1            2             3            4             5           6           7                   8                      9      
-int* pointer_array[]={p_lick_mode, p_trial, p_trial_set, p_now_pos, p_lick_rec_pos, p_water_flush, p_INDEBUGMODE, p_OGActiveMills, p_miniscopeRecord};
-int* pointerArrayType_array[]={p_waterServeMicros, p_lick_count};
+int* pointer_array[]={p_lick_mode, p_trial, p_trial_set, p_now_pos, p_lick_rec_pos, p_INDEBUGMODE, p_OGActiveMills, p_miniscopeRecord};
+int* pointerArrayType_array[]={p_waterServeMicros, p_lick_count, p_water_flush};
 int  pointerArrayType_arrayLength[]={8, 8};
 
 //                                  0         1          2           3            4      5          6             7          8          9       10              11  
@@ -78,7 +79,7 @@ public:
         interrupts();
         
         size_t len = strlen(msg);
-        len = min(len, (size_t)0xff);
+        len = std::min(len, (size_t)0xff);
         int requiredSpace = len + 2;
         
         if (currentWrite->size() + requiredSpace > currentWrite->maxSize() * 0.8) {
@@ -341,10 +342,10 @@ String bufferGetString(RingBuf<char, 1024>* buffer) {
 
 void print_status(String _head=""){
   // //                          0           1          2           3             4             5           6           7                   8                      9      
-  // int* pointer_array[]={p_lick_mode, p_trial, p_trial_set, p_now_pos, p_lick_rec_pos, p_water_flush, p_INDEBUGMODE};
-  char *log_buffer = new char[256];
-  sprintf(log_buffer, " lick_mode %d, trial %d, trial_set %d, now_pos %d, water_serve_mode %d INDEBUGMODE %d waiting %d" ,
-                        lick_mode, trial, trial_set, now_pos, water_flush, INDEBUGMODE, waiting);
+  // int* pointer_array[]={p_lick_mode, p_trial, p_trial_set, p_now_pos, p_lick_rec_pos, p_INDEBUGMODE};
+  char *log_buffer = new char[512];
+  sprintf(log_buffer, " lick_mode %d, trial %d, tempTrialStautsMark %d, now_pos %d INDEBUGMODE %d waiting %d" ,
+                        lick_mode, trial, tempTrialStautsMark, now_pos, INDEBUGMODE, waiting);
   String temp_log = "debugLog:"+ _head+ log_buffer;
   
   serial_send(temp_log);
@@ -352,8 +353,6 @@ void print_status(String _head=""){
 }
 
 void print_ArrayStatus(String _head=""){
-  // //                          0           1          2           3             4             5           6           7                   8                      9      
-  // int* pointer_array[]={p_lick_mode, p_trial, p_trial_set, p_now_pos, p_lick_rec_pos, p_water_flush};
   String temp_log = "waterServeMicros: ";
   for(int i =0; i < Length(waterServeMicros); i++){
     temp_log += String(waterServeMicros[i]);
@@ -365,7 +364,12 @@ void print_ArrayStatus(String _head=""){
     temp_log += String(lick_count[i]);
     if(i<7){temp_log += ", ";}
   }
-  
+
+  temp_log += "; water_flush: ";
+  for(int i =0; i < 8; i++){
+    temp_log += String(water_flush[i]);
+    if(i<7){temp_log += ", ";}
+  }
   temp_log = "debugLog:"+ _head+ temp_log;
   serial_send(temp_log);
 }
@@ -385,7 +389,7 @@ size_t stringToByteArray(String inputStr, byte* outputArray) {//return full leng
   outputArray[1] = typeId & 0xFF;
 
   // 计算内容长度
-  size_t contentLength = min(0xff, contentStr.length());
+  size_t contentLength = std::min((unsigned int)0xff, contentStr.length());
   outputArray[2] = contentLength & 0xFF;
   //以下index均减2
   // 写入内容本身
@@ -456,8 +460,12 @@ void init_by_PC(){
   trial_set = 0;
   now_pos = -1;                     
   lick_rec_pos = -1;                
-  water_flush = 0;                                     
-  waterserving = 0;
+  std::fill(std::begin(water_flush), std::end(water_flush), 0);                                     
+  std::fill(std::begin(lick_count), std::end(lick_count), 0);                                     
+  // waterserving = 0;
+  for(int i = 0; i < 8; i ++){
+    digitalWrite(waterServePins[i], LOW);
+  }
   serial_send("initialed manullay");
 
 }
@@ -496,7 +504,14 @@ void commandParse(String _command){
             // serial_send("log:invalid message!");
             return;
           }
-          *(pointerArrayType_array[input_ArrVar] + input_ArrInd)=input_value;
+          if(pointerArrayType_array[input_ArrVar] == water_flush){
+            water_flush[input_ArrInd] = (input_value >= 1? (water_flush[input_ArrInd] > 0? 0: 1): 0);
+            digitalWrite(waterServePins[input_ArrInd], (water_flush[input_ArrInd] > 0? HIGH: LOW));
+            // bufferPushString("water_flush set" + String(input_ArrInd) + " to " + String(waterServePins[input_ArrInd]));
+          }else{
+            *(pointerArrayType_array[input_ArrVar] + input_ArrInd)=input_value;
+            // bufferPushString("array" + String(input_ArrVar)+ " set" + String(input_ArrInd) + " to " + String(waterServePins[input_ArrInd]));
+          }
           char echoContent[256] = "";
           sprintf(echoContent, "echo:%s:echo", _command.c_str());
           Serial.println(echoContent);
@@ -543,10 +558,11 @@ void setup() {
   trial=0;                          
   trial_set = 0;
   now_pos = -1;                     
-  lick_rec_pos = -1;                
-  water_flush = 0;                                     
-  waterserving = 0;
+  lick_rec_pos = -1;                                                   
+  // waterserving = 0;
   SyncMark = 0;
+  std::fill(std::begin(water_flush), std::end(water_flush), 0);
+  std::fill(std::begin(lick_count), std::end(lick_count), 0);                                    
 
   for(int i = 0; i < 8; i ++){
     readLickPins[i] = 22 + i*2;
@@ -649,10 +665,6 @@ void loop() {
     else if(lick_mode==1){
       //舔了才出水
     }
-  }
-
-  if(water_flush==2){
-
   }
 
   while (Serial.available()) { // 当有数据可读时
