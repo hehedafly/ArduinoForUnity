@@ -4,7 +4,7 @@
 
 int waterServePins[8];//22,24,26...36
 int readLickPins[8];//23,25,27...37
-int waterServeMicros[8] = {20000, 20000, 20000, 20000, 20000, 20000, 20000, 20000};      int* p_waterServeMicros = waterServeMicros;
+int waterServeMicros[8] = {30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000};      int* p_waterServeMicros = waterServeMicros;
 
 const int INFARREDDETCETPIN = 49;
 const int PRESSLEVERPIN = 48;
@@ -15,7 +15,7 @@ const int SYNCINPUTPIN = 42;
 const int REACH = 1;
 const int LEAVE = 0;
 
-String VERSION = "V2.1";
+String VERSION = "V2.2";
 // const int SINGNALOUTPINS[8];
 // const int SINGNALINPUTPINS[8];
 
@@ -27,11 +27,14 @@ int lick_mode = 0;                    int* p_lick_mode = &lick_mode;
 int trial=0;                          int* p_trial = &trial;
 int trial_set = 0;                    int* p_trial_set = &trial_set;//设为0时结束，设为1时开始, 设为2时按now_pos给水
 int now_pos = -1;                     int* p_now_pos = &now_pos;//只管给水，不管屏幕显示
+int pre_pos = -1;
 int lick_rec_pos = -1;                int* p_lick_rec_pos = &lick_rec_pos;
 int water_flush[8] = {};              int* p_water_flush = water_flush;
 int lick_count[8] = {};               int* p_lick_count = lick_count;
 int OGActiveMills = 100;              int* p_OGActiveMills = &OGActiveMills;
 int miniscopeRecord = 0;              int* p_miniscopeRecord = &miniscopeRecord;
+int waterServeWhenLick = 0;           int* p_waterServeWhenLick = &waterServeWhenLick;
+int waterServeManual = -1;             int* p_waterServeManual = &waterServeManual;
 
 int INDEBUGMODE = 0;                  int* p_INDEBUGMODE = &INDEBUGMODE;
 
@@ -48,8 +51,8 @@ int indexInSerial = 0;
 bool isRecording = false;
 bool plainTextMark = false;
 int maxMsgCountPerChunk = 20;
-//                        0           1            2             3            4             5           6           7                   8                      9      
-int* pointer_array[]={p_lick_mode, p_trial, p_trial_set, p_now_pos, p_lick_rec_pos, p_INDEBUGMODE, p_OGActiveMills, p_miniscopeRecord};
+//                        0           1            2             3            4             5           6           7                   8                             9      
+int* pointer_array[]={p_lick_mode, p_trial, p_trial_set, p_now_pos, p_lick_rec_pos, p_INDEBUGMODE, p_OGActiveMills, p_miniscopeRecord, p_waterServeWhenLick, p_waterServeManual};
 int* pointerArrayType_array[]={p_waterServeMicros, p_lick_count, p_water_flush};
 int  pointerArrayType_arrayLength[]={8, 8};
 
@@ -215,14 +218,21 @@ void Sync_call_by_interrupt(){
   SyncMark = true;
 }
 
-void LickReportInInterrupt0(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 0, REACH);bufferPushChar(entry);lick_count[0]++;return;}
-void LickReportInInterrupt1(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 1, REACH);bufferPushChar(entry);lick_count[1]++;return;}
-void LickReportInInterrupt2(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 2, REACH);bufferPushChar(entry);lick_count[2]++;return;}
-void LickReportInInterrupt3(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 3, REACH);bufferPushChar(entry);lick_count[3]++;return;}
-void LickReportInInterrupt4(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 4, REACH);bufferPushChar(entry);lick_count[4]++;return;}
-void LickReportInInterrupt5(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 5, REACH);bufferPushChar(entry);lick_count[5]++;return;}
-void LickReportInInterrupt6(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 6, REACH);bufferPushChar(entry);lick_count[6]++;return;}
-void LickReportInInterrupt7(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 7, REACH);bufferPushChar(entry);lick_count[7]++;return;}
+void ExecuteWhenLicking(int lickSpout){
+  // if(waterServeWhenLick == 1 & now_pos != -1){
+  //   pump_set(lickSpout, waterServeMicros[now_pos]);
+  // }
+}
+
+
+void LickReportInInterrupt0(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 0, REACH);bufferPushChar(entry);lick_count[0]++;ExecuteWhenLicking(0);return;}
+void LickReportInInterrupt1(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 1, REACH);bufferPushChar(entry);lick_count[1]++;ExecuteWhenLicking(1);return;}
+void LickReportInInterrupt2(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 2, REACH);bufferPushChar(entry);lick_count[2]++;ExecuteWhenLicking(2);return;}
+void LickReportInInterrupt3(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 3, REACH);bufferPushChar(entry);lick_count[3]++;ExecuteWhenLicking(3);return;}
+void LickReportInInterrupt4(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 4, REACH);bufferPushChar(entry);lick_count[4]++;ExecuteWhenLicking(4);return;}
+void LickReportInInterrupt5(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 5, REACH);bufferPushChar(entry);lick_count[5]++;ExecuteWhenLicking(5);return;}
+void LickReportInInterrupt6(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 6, REACH);bufferPushChar(entry);lick_count[6]++;ExecuteWhenLicking(6);return;}
+void LickReportInInterrupt7(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 7, REACH);bufferPushChar(entry);lick_count[7]++;ExecuteWhenLicking(7);return;}
 
 void LickReportInInterrupt0_leave(){char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 0, LEAVE);bufferPushChar(entry);lick_count[0]++;return;}
 
@@ -405,6 +415,7 @@ int TrialStart(){
 int TrialEnd(){
   waiting = 1;
   now_pos = -1;
+  waterServeWhenLick = 0;
   //print_status("In trial end:");
   return 1;
 }
@@ -501,6 +512,8 @@ void commandParse(String _command){
             OG_set();
           }else if(pointer_array[input_var] == p_miniscopeRecord){
             digitalWrite(MSRECORDPIN, input_value == 0? LOW: HIGH);
+          }else if(pointer_array[input_var] == p_now_pos){
+            pre_pos = now_pos;
           }
         }
       }
@@ -605,12 +618,26 @@ void loop() {
         // serial_send("debugLog:trial end");
 
       }
+      else if (tempTrialStautsMark == 3 && now_pos != -1) {
+        waterServeWhenLick = 1;
+      }
       else if(tempTrialStautsMark == 0){//end
         TrialEnd();
         // serial_send("debugLog:trial end, no water");
       }
     }
     tempTrialStautsMark = -1;
+  }
+
+  if(waterServeManual != -1){
+    if(waterServeManual == -2){
+      if(pre_pos != -1){waterServeManual = pre_pos;}
+    }
+
+    if(waterServeManual > -1 & waterServeManual < Length(waterServePins)){
+      pump_set(waterServePins[waterServeManual], waterServeMicros[waterServeManual]);
+    }
+    waterServeManual = -1;
   }
 
   if(!waiting){
