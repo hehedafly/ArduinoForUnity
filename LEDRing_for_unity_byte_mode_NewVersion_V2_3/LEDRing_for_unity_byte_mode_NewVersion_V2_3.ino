@@ -62,6 +62,10 @@ int indexInSerial = 0;
 bool isRecording = false;
 bool plainTextMark = false;
 int maxMsgCountPerChunk = 20;
+
+// ========== 握手状态 ==========
+bool handshakeDone = false;           // 全局握手状态标志
+unsigned long lastHandshakeAttempt = 0;  // 上次握手尝试时间
 //                        0           1            2             3            4             5           6           7                   8                             9      
 int* pointer_array[]={p_lick_mode, p_trial, p_trial_set, p_now_pos, p_lick_rec_pos, p_INDEBUGMODE, p_OGActiveMills, p_miniscopeRecord, p_waterServeWhenLick, p_waterServeManual};
 int* pointerArrayType_array[]={p_waterServeMicros, p_lick_count, p_water_flush};
@@ -516,25 +520,59 @@ int TrialEnd(){
 }
 
 void init_by_PC(){
-  waiting = 1;                      
-  lick_mode = 0;                    
-  trial=0;                          
+  // === 状态变量 ===
+  waiting = 1;
+  lick_mode = 0;
+  trial = 0;
   trial_set = 0;
-  now_pos = -1;                     
-  lick_rec_pos = -1;                
-  std::fill(std::begin(water_flush), std::end(water_flush), 0);                                     
-  std::fill(std::begin(lick_count), std::end(lick_count), 0);                                     
-  // waterserving = 0;
+  now_pos = -1;
+  pre_pos = -1;
+  lick_rec_pos = -1;
+  tempTrialStautsMark = -1;
+  waterServeWhenLick = 0;
+  waterServeManual = -1;
+  OGActiveMills = 100;
+  miniscopeRecord = 0;
+  INDEBUGMODE = 0;
+  tempLickPos = -1;
+  lickEndThresholdMills = -1;
+
+  // === 计数器清零 ===
+  std::fill(std::begin(water_flush), std::end(water_flush), 0);
+  std::fill(std::begin(lick_count), std::end(lick_count), 0);
+
+  // === 停止所有Timer ===
+  pumpTimer.stop();
+  OGTimer.stop();
+  active_pin = -1;
+  digitalWrite(OGOUTPIN, LOW);
+
+  // === 输出引脚复位 ===
   for(int i = 0; i < 8; i ++){
     digitalWrite(waterServePins[i], LOW);
   }
-  serial_send("initialed manullay");
+  digitalWrite(13, LOW);
+  digitalWrite(MSRECORDPIN, LOW);
 
+  // === 通信状态复位 ===
+  isRecording = false;
+  indexInSerial = 0;
+  plainTextMark = false;
+  SyncMark = false;
+
+  // === 发送缓冲区清空 ===
+  // 交换到空缓冲区
+  if (sendDataBuffers.shouldSwap()) {
+    sendDataBuffers.swap();
+  }
+  handshakeDone = false;
+  // serial_send("initialed manullay");
 }
 
 void commandParse(String _command){
 
   _command.replace("\n", "");
+  _command.replace("\r", "");
   int equal_pos=_command.indexOf('=');
   if(_command.compareTo("check") == 0){
     print_status();
@@ -680,7 +718,7 @@ void setup() {
   #endif
 
   // 握手循环：不断发送初始化消息直到收到 ACK
-  bool handshakeDone = false;
+  handshakeDone = false;
   while (!handshakeDone) {
     CUSTOM_SERIAL.println("initialed:" + VERSION);
 
@@ -702,6 +740,24 @@ void setup() {
 }
 
 void loop() {
+
+  while (!handshakeDone) {
+    CUSTOM_SERIAL.println("initialed:" + VERSION);
+
+    unsigned long startTime = millis();
+    while (!handshakeDone && (millis() - startTime < 500)) {
+      if (CUSTOM_SERIAL.available() > 0) {
+        String cmd = CUSTOM_SERIAL.readStringUntil('\n');
+        cmd.trim();
+        if (cmd == "ACK") {
+          handshakeDone = true;  // 收到确认，退出握手循环
+          CUSTOM_SERIAL.println("ACK_OK");  // 确认握手成功
+        }
+      }
+      delay(10);
+    }
+    delay(100);
+  }
 
   if (sendDataBuffers.shouldSwap()) {
       sendDataBuffers.swap();
@@ -769,6 +825,7 @@ void loop() {
 
   while (CUSTOM_SERIAL.available()) { // 当有数据可读时
     byte inByte = (byte)CUSTOM_SERIAL.read();
+
     // 检查是否接收到起始标志
     if (!isRecording && inByte == 0xAA) {
       isRecording = true;
@@ -801,7 +858,7 @@ void loop() {
         receivedData[indexInSerial++] = inByte; // 将字符添加到数组
         // CUSTOM_SERIAL.print(inByte);
       }
-      
+
       // 防止数组越界
       if (indexInSerial >= sizeof(receivedData)) {
         indexInSerial = 0;
