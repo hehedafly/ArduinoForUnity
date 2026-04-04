@@ -519,7 +519,7 @@ int TrialEnd(){
   return 1;
 }
 
-void init_by_PC(){
+void init_by_PC(bool resetConnectStatus = true){
   // === 状态变量 ===
   waiting = 1;
   lick_mode = 0;
@@ -565,7 +565,10 @@ void init_by_PC(){
   if (sendDataBuffers.shouldSwap()) {
     sendDataBuffers.swap();
   }
-  handshakeDone = false;
+
+  if(resetConnectStatus){
+    handshakeDone = false;
+  }
   // serial_send("initialed manullay");
 }
 
@@ -578,12 +581,16 @@ void commandParse(String _command){
     print_status();
     return;
   }
-  if(_command.compareTo("checkArray")==0){
+  else if(_command.compareTo("checkArray")==0){
     print_ArrayStatus();
     return;
   }
-  if(_command.compareTo("forceinit")==0){
+  else if(_command.compareTo("forceinit")==0){
     init_by_PC();
+    return;
+  }
+  else if(_command.compareTo("clear")==0){
+    init_by_PC(false);
     return;
   }
 
@@ -736,6 +743,7 @@ void setup() {
     delay(100);
   }
 
+  CUSTOM_SERIAL.println("");  // 确认握手成功
   CUSTOM_SERIAL.println("ACK_OK");  // 确认握手成功
 }
 
@@ -751,6 +759,7 @@ void loop() {
         cmd.trim();
         if (cmd == "ACK") {
           handshakeDone = true;  // 收到确认，退出握手循环
+          CUSTOM_SERIAL.println("ACK_OK");  // 确认握手成功
           CUSTOM_SERIAL.println("ACK_OK");  // 确认握手成功
         }
       }
