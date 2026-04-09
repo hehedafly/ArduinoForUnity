@@ -730,12 +730,20 @@ void setup() {
     CUSTOM_SERIAL.println("initialed:" + VERSION);
 
     unsigned long startTime = millis();
+    String cmd = "";
     while (!handshakeDone && (millis() - startTime < 500)) {
-      if (CUSTOM_SERIAL.available() > 0) {
-        String cmd = CUSTOM_SERIAL.readStringUntil('\n');
-        cmd.trim();
-        if (cmd == "ACK") {
-          handshakeDone = true;  // 收到确认，退出握手循环
+      while (CUSTOM_SERIAL.available() > 0) {
+        char c = CUSTOM_SERIAL.read();
+        if (c == '\n' || c == '\r') {
+          cmd.replace("\r", "");
+          cmd.replace("\n", "");
+          if (cmd.endsWith("ACK")) {
+            handshakeDone = true;  // 收到确认，退出握手循环
+            CUSTOM_SERIAL.println("ACK_OK");  // 确认握手成功
+          }
+          cmd = "";
+        } else {
+          cmd += c;
         }
       }
       delay(10);
@@ -743,8 +751,6 @@ void setup() {
     delay(100);
   }
 
-  CUSTOM_SERIAL.println("");  // 确认握手成功
-  CUSTOM_SERIAL.println("ACK_OK");  // 确认握手成功
 }
 
 void loop() {
@@ -753,14 +759,20 @@ void loop() {
     CUSTOM_SERIAL.println("initialed:" + VERSION);
 
     unsigned long startTime = millis();
+    String cmd = "";
     while (!handshakeDone && (millis() - startTime < 500)) {
-      if (CUSTOM_SERIAL.available() > 0) {
-        String cmd = CUSTOM_SERIAL.readStringUntil('\n');
-        cmd.trim();
-        if (cmd == "ACK") {
-          handshakeDone = true;  // 收到确认，退出握手循环
-          CUSTOM_SERIAL.println("ACK_OK");  // 确认握手成功
-          CUSTOM_SERIAL.println("ACK_OK");  // 确认握手成功
+      while (CUSTOM_SERIAL.available() > 0) {
+        char c = CUSTOM_SERIAL.read();
+        if (c == '\n' || c == '\r') {
+          cmd.replace("\r", "");
+          cmd.replace("\n", "");
+          if (cmd.endsWith("ACK")) {
+            handshakeDone = true;  // 收到确认，退出握手循环
+            CUSTOM_SERIAL.println("ACK_OK");  // 确认握手成功
+          }
+          cmd = "";
+        } else {
+          cmd += c;
         }
       }
       delay(10);
