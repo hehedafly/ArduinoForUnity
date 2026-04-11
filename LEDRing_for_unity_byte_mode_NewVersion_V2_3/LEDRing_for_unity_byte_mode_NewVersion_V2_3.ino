@@ -63,6 +63,8 @@ bool isRecording = false;
 bool plainTextMark = false;
 int maxMsgCountPerChunk = 20;
 
+int autoStressTest = 0;
+
 // ========== 握手状态 ==========
 bool handshakeDone = false;           // 全局握手状态标志
 unsigned long lastHandshakeAttempt = 0;  // 上次握手尝试时间
@@ -335,6 +337,12 @@ void LickReportInInterrupt7(){      char entry[16];sprintf(entry, "%s:%d:%d", se
 
 void LickReportInInterrupt0_leave(){char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 0, LEAVE);bufferPushChar(entry);lick_count[0]++;return;}
 
+void AutoLickReport(){
+  char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], -4, REACH);
+  bufferPushChar(entry);
+  return;
+}
+
 void InfraRedInReportInInterrupt(){
   char _content[sizeof("entrance::In") + 8] = "";
   sprintf(_content, "entrance:%d:In", trial);
@@ -592,6 +600,14 @@ void commandParse(String _command){
   else if(_command.compareTo("clear")==0){
     init_by_PC(false);
     return;
+  }else if(_command.compareTo("autoStressTest")==0){
+    bufferPushChar("debugLog:autoStressTest start");
+    autoStressTest = 1;
+    return;
+  }
+  else if(_command.compareTo("autoStressTestStop")==0){
+    autoStressTest = 0;
+    return;
   }
 
   if(equal_pos>0 && _command.substring(0, equal_pos).compareTo("sw")==0){
@@ -804,7 +820,10 @@ void loop() {
   if(tempTrialStautsMark != -1){//trial status update
     if(tempTrialStautsMark == 1){//start
       TrialStart();
-
+      if(autoStressTest > 0){
+        delay(100);
+        AutoLickReport();
+      }
     }else { 
       if(tempTrialStautsMark == 2 && now_pos != -1){//serve water and end
         pump_set(waterServePins[now_pos], waterServeMicros[now_pos]);
