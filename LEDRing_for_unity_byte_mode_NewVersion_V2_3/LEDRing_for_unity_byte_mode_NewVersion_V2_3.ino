@@ -13,9 +13,13 @@
   #define CUSTOM_SERIAL Serial
 #endif
 
+#define STR(x) #x
+#define XSTR(x) STR(x)
+#define MAKE_ENTRY(type, val, reach) type ":" #val ":" XSTR(reach)
+
 int waterServePins[8];//22,24,26...36
 int readLickPins[8];//23,25,27...37
-int waterServeMicros[8] = {30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000};      int* p_waterServeMicros = waterServeMicros;
+int waterServeMicros[8] = {10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000};      int* p_waterServeMicros = waterServeMicros;
 
 const int INFARREDDETCETPIN = 49;
 const int PRESSLEVERPIN = 48;
@@ -76,6 +80,7 @@ int  pointerArrayType_arrayLength[]={8, 8};
 //                                  0         1          2           3            4      5          6             7          8          9       10              11
 // const char* serial_print_type[]={"lick", "entrance", "press", "context_info", "log", "echo", "value_change", "command", "debugLog", "stay", "syncInfo", "miniscopeStart"};
 const char* serial_print_type[]={"li",      "en",       "pr",     "ci",          "log", "echo", "vc",           "cmd",     "debugLog", "st",    "si",       "ms"};
+#define CH_TYPE_0   "li"
 
 // ========== 缓存配置 ==========
 // 在此数组中添加需要缓存的前缀
@@ -326,16 +331,28 @@ void ExecuteWhenLicking(int lickSpout){
 }
 
 
-void LickReportInInterrupt0(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 0, REACH);bufferPushChar(entry);lick_count[0]++;ExecuteWhenLicking(0);return;}
-void LickReportInInterrupt1(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 1, REACH);bufferPushChar(entry);lick_count[1]++;ExecuteWhenLicking(1);return;}
-void LickReportInInterrupt2(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 2, REACH);bufferPushChar(entry);lick_count[2]++;ExecuteWhenLicking(2);return;}
-void LickReportInInterrupt3(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 3, REACH);bufferPushChar(entry);lick_count[3]++;ExecuteWhenLicking(3);return;}
-void LickReportInInterrupt4(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 4, REACH);bufferPushChar(entry);lick_count[4]++;ExecuteWhenLicking(4);return;}
-void LickReportInInterrupt5(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 5, REACH);bufferPushChar(entry);lick_count[5]++;ExecuteWhenLicking(5);return;}
-void LickReportInInterrupt6(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 6, REACH);bufferPushChar(entry);lick_count[6]++;ExecuteWhenLicking(6);return;}
-void LickReportInInterrupt7(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 7, REACH);bufferPushChar(entry);lick_count[7]++;ExecuteWhenLicking(7);return;}
+// void LickReportInInterrupt0(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 0, REACH);bufferPushChar(entry);lick_count[0]++;ExecuteWhenLicking(0);return;}
+// void LickReportInInterrupt1(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 1, REACH);bufferPushChar(entry);lick_count[1]++;ExecuteWhenLicking(1);return;}
+// void LickReportInInterrupt2(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 2, REACH);bufferPushChar(entry);lick_count[2]++;ExecuteWhenLicking(2);return;}
+// void LickReportInInterrupt3(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 3, REACH);bufferPushChar(entry);lick_count[3]++;ExecuteWhenLicking(3);return;}
+// void LickReportInInterrupt4(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 4, REACH);bufferPushChar(entry);lick_count[4]++;ExecuteWhenLicking(4);return;}
+// void LickReportInInterrupt5(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 5, REACH);bufferPushChar(entry);lick_count[5]++;ExecuteWhenLicking(5);return;}
+// void LickReportInInterrupt6(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 6, REACH);bufferPushChar(entry);lick_count[6]++;ExecuteWhenLicking(6);return;}
+// void LickReportInInterrupt7(){      char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 7, REACH);bufferPushChar(entry);lick_count[7]++;ExecuteWhenLicking(7);return;}
 
-void LickReportInInterrupt0_leave(){char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 0, LEAVE);bufferPushChar(entry);lick_count[0]++;return;}
+// void LickReportInInterrupt0_leave(){char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 0, LEAVE);bufferPushChar(entry);lick_count[0]++;return;}
+
+void LickReportInInterrupt0() {static const char msg[] PROGMEM = MAKE_ENTRY(CH_TYPE_0, 0, REACH);char entry[16];strcpy_P(entry, msg);bufferPushChar(entry);lick_count[0]++;ExecuteWhenLicking(0);}
+void LickReportInInterrupt1() {static const char msg[] PROGMEM = MAKE_ENTRY(CH_TYPE_0, 1, REACH);char entry[16];strcpy_P(entry, msg);bufferPushChar(entry);lick_count[0]++;ExecuteWhenLicking(0);}
+void LickReportInInterrupt2() {static const char msg[] PROGMEM = MAKE_ENTRY(CH_TYPE_0, 2, REACH);char entry[16];strcpy_P(entry, msg);bufferPushChar(entry);lick_count[0]++;ExecuteWhenLicking(0);}
+void LickReportInInterrupt3() {static const char msg[] PROGMEM = MAKE_ENTRY(CH_TYPE_0, 3, REACH);char entry[16];strcpy_P(entry, msg);bufferPushChar(entry);lick_count[0]++;ExecuteWhenLicking(0);}
+void LickReportInInterrupt4() {static const char msg[] PROGMEM = MAKE_ENTRY(CH_TYPE_0, 4, REACH);char entry[16];strcpy_P(entry, msg);bufferPushChar(entry);lick_count[0]++;ExecuteWhenLicking(0);}
+void LickReportInInterrupt5() {static const char msg[] PROGMEM = MAKE_ENTRY(CH_TYPE_0, 5, REACH);char entry[16];strcpy_P(entry, msg);bufferPushChar(entry);lick_count[0]++;ExecuteWhenLicking(0);}
+void LickReportInInterrupt6() {static const char msg[] PROGMEM = MAKE_ENTRY(CH_TYPE_0, 6, REACH);char entry[16];strcpy_P(entry, msg);bufferPushChar(entry);lick_count[0]++;ExecuteWhenLicking(0);}
+void LickReportInInterrupt7() {static const char msg[] PROGMEM = MAKE_ENTRY(CH_TYPE_0, 7, REACH);char entry[16];strcpy_P(entry, msg);bufferPushChar(entry);lick_count[0]++;ExecuteWhenLicking(0);}
+
+void LickReportInInterrupt0_leave() {static const char msg[] PROGMEM = MAKE_ENTRY(CH_TYPE_0, 0, LEAVE);char entry[16];strcpy_P(entry, msg);bufferPushChar(entry);ExecuteWhenLicking(0);}
+
 
 void AutoLickReport(){
   char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], -4, REACH);
@@ -544,6 +561,7 @@ void init_by_PC(bool resetConnectStatus = true){
   INDEBUGMODE = 0;
   tempLickPos = -1;
   lickEndThresholdMills = -1;
+  autoStressTest = 0;
 
   // === 计数器清零 ===
   std::fill(std::begin(water_flush), std::end(water_flush), 0);
@@ -686,6 +704,7 @@ void setup() {
   lick_rec_pos = -1;                                                   
   // waterserving = 0;
   SyncMark = 0;
+  autoStressTest = 0;
   std::fill(std::begin(water_flush), std::end(water_flush), 0);
   std::fill(std::begin(lick_count), std::end(lick_count), 0);                                    
 
@@ -728,6 +747,11 @@ void setup() {
   // // attachInterrupt(digitalPinToInterrupt(readLickPins[5]), LickReportInInterrupt5, RISING);
   // // attachInterrupt(digitalPinToInterrupt(readLickPins[6]), LickReportInInterrupt6, RISING);
   // // attachInterrupt(digitalPinToInterrupt(readLickPins[7]), LickReportInInterrupt7, RISING);
+
+  NVIC_SetPriority(PIOA_IRQn, 1);
+  NVIC_SetPriority(PIOB_IRQn, 1);
+  NVIC_SetPriority(PIOC_IRQn, 1);
+  NVIC_SetPriority(PIOD_IRQn, 1);
 
   // attachInterrupt(digitalPinToInterrupt(3), InfraRedInReportInInterrupt, FALLING);
   // attachInterrupt(digitalPinToInterrupt(5), InfraRedLeaveReportInInterrupt, RISING);
@@ -804,7 +828,7 @@ void loop() {
   RingBuf<char, 1024>* readBuffer = sendDataBuffers.getReadBuffer();
   int _count = 0;
   
-  while (!readBuffer->isEmpty() && _count < maxMsgCountPerChunk) {
+  while (!readBuffer->isEmpty() && _count < maxMsgCountPerChunk && Serial.availableForWrite() > 5) {
       String message = bufferGetString(readBuffer);
       if (message.length() > 0) {
           serial_send(message);
