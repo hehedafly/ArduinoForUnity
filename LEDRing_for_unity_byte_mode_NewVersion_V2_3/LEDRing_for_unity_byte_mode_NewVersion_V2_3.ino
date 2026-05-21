@@ -27,8 +27,8 @@ const int OGOUTPIN = 40;
 const int MSRECORDPIN = 41;
 const int SYNCINPUTPIN = 42;
 
-const int REACH = 1;
-const int LEAVE = 0;
+#define REACH 1
+#define LEAVE 0
 
 String VERSION = "V2.3";
 // const int SINGNALOUTPINS[8];
