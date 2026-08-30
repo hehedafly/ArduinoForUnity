@@ -19,7 +19,7 @@
 
 int waterServePins[8];//22,24,26...36
 int readLickPins[8];//23,25,27...37
-int waterServeMicros[8] = {10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000};      int* p_waterServeMicros = waterServeMicros;
+int waterServeMicros[8] = {20000, 20000, 20000, 20000, 20000, 20000, 20000, 20000};      int* p_waterServeMicros = waterServeMicros;
 
 const int INFARREDDETCETPIN = 49;
 const int PRESSLEVERPIN = 48;
@@ -345,19 +345,19 @@ void ExecuteWhenLicking(int lickSpout){
 // void LickReportInInterrupt0_leave(){char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], 0, LEAVE);bufferPushChar(entry);lick_count[0]++;return;}
 
 void LickReportInInterrupt0() {static const char msg[] PROGMEM = MAKE_ENTRY(CH_TYPE_0, 0, REACH);char entry[16];strcpy_P(entry, msg);bufferPushChar(entry);lick_count[0]++;ExecuteWhenLicking(0);}
-void LickReportInInterrupt1() {static const char msg[] PROGMEM = MAKE_ENTRY(CH_TYPE_0, 1, REACH);char entry[16];strcpy_P(entry, msg);bufferPushChar(entry);lick_count[0]++;ExecuteWhenLicking(0);}
-void LickReportInInterrupt2() {static const char msg[] PROGMEM = MAKE_ENTRY(CH_TYPE_0, 2, REACH);char entry[16];strcpy_P(entry, msg);bufferPushChar(entry);lick_count[0]++;ExecuteWhenLicking(0);}
-void LickReportInInterrupt3() {static const char msg[] PROGMEM = MAKE_ENTRY(CH_TYPE_0, 3, REACH);char entry[16];strcpy_P(entry, msg);bufferPushChar(entry);lick_count[0]++;ExecuteWhenLicking(0);}
-void LickReportInInterrupt4() {static const char msg[] PROGMEM = MAKE_ENTRY(CH_TYPE_0, 4, REACH);char entry[16];strcpy_P(entry, msg);bufferPushChar(entry);lick_count[0]++;ExecuteWhenLicking(0);}
-void LickReportInInterrupt5() {static const char msg[] PROGMEM = MAKE_ENTRY(CH_TYPE_0, 5, REACH);char entry[16];strcpy_P(entry, msg);bufferPushChar(entry);lick_count[0]++;ExecuteWhenLicking(0);}
-void LickReportInInterrupt6() {static const char msg[] PROGMEM = MAKE_ENTRY(CH_TYPE_0, 6, REACH);char entry[16];strcpy_P(entry, msg);bufferPushChar(entry);lick_count[0]++;ExecuteWhenLicking(0);}
-void LickReportInInterrupt7() {static const char msg[] PROGMEM = MAKE_ENTRY(CH_TYPE_0, 7, REACH);char entry[16];strcpy_P(entry, msg);bufferPushChar(entry);lick_count[0]++;ExecuteWhenLicking(0);}
+void LickReportInInterrupt1() {static const char msg[] PROGMEM = MAKE_ENTRY(CH_TYPE_0, 1, REACH);char entry[16];strcpy_P(entry, msg);bufferPushChar(entry);lick_count[1]++;ExecuteWhenLicking(1);}
+void LickReportInInterrupt2() {static const char msg[] PROGMEM = MAKE_ENTRY(CH_TYPE_0, 2, REACH);char entry[16];strcpy_P(entry, msg);bufferPushChar(entry);lick_count[2]++;ExecuteWhenLicking(2);}
+void LickReportInInterrupt3() {static const char msg[] PROGMEM = MAKE_ENTRY(CH_TYPE_0, 3, REACH);char entry[16];strcpy_P(entry, msg);bufferPushChar(entry);lick_count[3]++;ExecuteWhenLicking(3);}
+void LickReportInInterrupt4() {static const char msg[] PROGMEM = MAKE_ENTRY(CH_TYPE_0, 4, REACH);char entry[16];strcpy_P(entry, msg);bufferPushChar(entry);lick_count[4]++;ExecuteWhenLicking(4);}
+void LickReportInInterrupt5() {static const char msg[] PROGMEM = MAKE_ENTRY(CH_TYPE_0, 5, REACH);char entry[16];strcpy_P(entry, msg);bufferPushChar(entry);lick_count[5]++;ExecuteWhenLicking(5);}
+void LickReportInInterrupt6() {static const char msg[] PROGMEM = MAKE_ENTRY(CH_TYPE_0, 6, REACH);char entry[16];strcpy_P(entry, msg);bufferPushChar(entry);lick_count[6]++;ExecuteWhenLicking(6);}
+void LickReportInInterrupt7() {static const char msg[] PROGMEM = MAKE_ENTRY(CH_TYPE_0, 7, REACH);char entry[16];strcpy_P(entry, msg);bufferPushChar(entry);lick_count[7]++;ExecuteWhenLicking(7);}
 
 void LickReportInInterrupt0_leave() {static const char msg[] PROGMEM = MAKE_ENTRY(CH_TYPE_0, 0, LEAVE);char entry[16];strcpy_P(entry, msg);bufferPushChar(entry);ExecuteWhenLicking(0);}
 
 
 void AutoLickReport(){
-  char entry[16];sprintf(entry, "%s:%d:%d", serial_print_type[0], -4, REACH);
+  char entry[16];sprintf(entry, "%s:%d:%d", CH_TYPE_0, -4, REACH);
   bufferPushChar(entry);
   return;
 }
@@ -694,7 +694,12 @@ void commandParse(String _command){
             pre_pos = now_pos;
           }else if(pointer_array[input_var] == p_lightControl){
             lightControl = constrain(lightControl, 0, 4096);
-            analogWrite(OGLIGHTPOWERPIN, lightControl);
+            if(lightControl == 0){
+              pinMode(OGLIGHTPOWERPIN, OUTPUT);
+              digitalWrite(OGLIGHTPOWERPIN, LOW);
+            }else{
+              analogWrite(OGLIGHTPOWERPIN, lightControl);
+            }
           }
         }
       }
@@ -737,6 +742,7 @@ void setup() {
   pinMode(INFARREDDETCETPIN, INPUT);
   pinMode(PRESSLEVERPIN, INPUT);
   pinMode(SYNCINPUTPIN, INPUT);
+  pinMode(OGLIGHTPOWERPIN, OUTPUT);
   analogWriteResolution(12);
   analogReadResolution(12); 
   digitalWrite(13, LOW);
@@ -746,7 +752,7 @@ void setup() {
   digitalWrite(INFARREDDETCETPIN, HIGH);
   digitalWrite(PRESSLEVERPIN, HIGH);
   digitalWrite(SYNCINPUTPIN, HIGH);
-  analogWrite(OGLIGHTPOWERPIN, 0);
+  digitalWrite(OGLIGHTPOWERPIN, LOW);
   
 
   attachInterrupt(digitalPinToInterrupt(readLickPins[0]), LickReportInInterrupt0, RISING);
@@ -855,7 +861,7 @@ void loop() {
     if(tempTrialStautsMark == 1){//start
       TrialStart();
       if(autoStressTest > 0){
-        delay(100);
+        delay(500);
         AutoLickReport();
       }
     }else { 
