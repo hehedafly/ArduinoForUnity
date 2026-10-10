@@ -117,7 +117,7 @@ def handshake_loop():
     last_send = ticks_ms() - 1000
     while not handshake_done:
         if ticks_diff(ticks_ms(), last_send) >= 500:
-            _send_line("initialed:" + config.VERSION)
+            _send_line(config.BOARD_BANNER+"initialed:" + config.VERSION)
             last_send = ticks_ms()
         while _serial.any() > 0 and not handshake_done:
             c = _read_char()

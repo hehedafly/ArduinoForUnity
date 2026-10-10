@@ -153,8 +153,8 @@ bool matchesCachePrefix(const char* str) {
   return false;
 }
 
-DueTimer pumpTimer = Timer.getAvailable();
-DueTimer OGTimer = Timer.getAvailable();
+DueTimer pumpTimer(0);
+DueTimer OGTimer(1);
 volatile int active_pin=-1;
 
 class DoubleBuffer {
@@ -357,8 +357,11 @@ void LickReportInInterrupt0_leave() {static const char msg[] PROGMEM = MAKE_ENTR
 
 
 void AutoLickReport(){
-  char entry[16];sprintf(entry, "%s:%d:%d", CH_TYPE_0, -4, REACH);
-  bufferPushChar(entry);
+  char msg[] PROGMEM = MAKE_ENTRY(CH_TYPE_0, -4, REACH);
+  char entry[16];
+  strcpy_P(entry, msg);
+  // bufferPushChar(entry);
+  serial_send(entry);
   return;
 }
 
@@ -442,6 +445,14 @@ void print_status(String _head=""){
   
   serial_send(temp_log);
   delete log_buffer;
+}
+
+void print_status_value(){
+
+}
+
+void parse_status_value(){
+  
 }
 
 void print_ArrayStatus(String _head=""){
@@ -563,7 +574,6 @@ void init_by_PC(bool resetConnectStatus = true){
   INDEBUGMODE = 0;
   tempLickPos = -1;
   lickEndThresholdMills = -1;
-  autoStressTest = 0;
 
   // === 计数器清零 ===
   std::fill(std::begin(water_flush), std::end(water_flush), 0);
@@ -598,6 +608,7 @@ void init_by_PC(bool resetConnectStatus = true){
 
   if(resetConnectStatus){
     handshakeDone = false;
+    autoStressTest = 0;
   }
   // serial_send("initialed manullay");
 }
@@ -623,8 +634,10 @@ void commandParse(String _command){
     init_by_PC(false);
     return;
   }else if(_command.compareTo("autoStressTest")==0){
-    bufferPushChar("debugLog:autoStressTest start");
-    autoStressTest = 1;
+    if(autoStressTest == 0){
+      bufferPushChar("debugLog:autoStressTest start");
+      autoStressTest = 1;
+    }
     return;
   }
   else if(_command.compareTo("autoStressTestStop")==0){
@@ -675,6 +688,8 @@ void commandParse(String _command){
 
         int input_var=(_command.substring(0, equal_pos)).toInt();
         int input_value=(_command.substring(equal_pos+1)).toInt();
+
+        if(input_var == 0 && _command.substring(0, equal_pos).compareTo("0")!=0){return;}
 
         if(input_var>=0 && input_var<sizeof(pointer_array)){
           *(pointer_array[input_var])=input_value;
@@ -756,6 +771,7 @@ void setup() {
   
 
   attachInterrupt(digitalPinToInterrupt(readLickPins[0]), LickReportInInterrupt0, RISING);
+  attachInterrupt(digitalPinToInterrupt(readLickPins[2]), LickReportInInterrupt0, RISING);
   attachInterrupt(digitalPinToInterrupt(readLickPins[1]), LickReportInInterrupt0_leave, FALLING);
   // // attachInterrupt(digitalPinToInterrupt(readLickPins[2]), LickReportInInterrupt2, RISING);
   // // attachInterrupt(digitalPinToInterrupt(readLickPins[3]), LickReportInInterrupt3, RISING);
@@ -844,7 +860,7 @@ void loop() {
   RingBuf<char, 1024>* readBuffer = sendDataBuffers.getReadBuffer();
   int _count = 0;
   
-  while (!readBuffer->isEmpty() && _count < maxMsgCountPerChunk && Serial.availableForWrite() > 5) {
+  while (!readBuffer->isEmpty() && _count < maxMsgCountPerChunk && CUSTOM_SERIAL.availableForWrite() > 5) {
       String message = bufferGetString(readBuffer);
       if (message.length() > 0) {
           serial_send(message);
@@ -862,7 +878,10 @@ void loop() {
       TrialStart();
       if(autoStressTest > 0){
         delay(500);
-        AutoLickReport();
+        for(int i = 0; i < 3; i++){
+          AutoLickReport();
+          delay(50);
+        }
       }
     }else { 
       if(tempTrialStautsMark == 2 && now_pos != -1){//serve water and end
