@@ -13,13 +13,24 @@ try:
 except Exception:
     spare_high_pin = None
 
-# ---- DAC（光功率 12-bit 0~3.3V）----
-light_dac = DAC(config.LIGHT_POWER_DAC, bits=12)
+# ---- 触摸面板复位引脚（未配置为 None；低有效，空闲保持高）----
+tp_reset_pin = None
+if config.TOUCHPANNEL_RESET_PIN is not None:
+    tp_reset_pin = Pin(config.TOUCHPANNEL_RESET_PIN, Pin.OUT_PP)
+    tp_reset_pin.high()
 
-def set_light_power(v):
+# ---- DAC（光功率 12-bit 0~3.3V，2 路独立：DAC1=X5/PA4 光功率0、DAC2=X6/PA5 光功率1）----
+light_dacs = [DAC(i, bits=12) for i in config.LIGHT_POWER_DACS]
+
+def set_light_power(v, ch=-1):
+    # ch: 0/1 = 单路；-1 = 全部（旧渠道 10=lightControl 走全部，保持"单一光功率"原语义）
     v = int(v)
-    v = 4095 if v > 4095 else (0 if v < 0 else v)
-    light_dac.write(v)
+    v = config.LIGHT_POWER_FULL if v > config.LIGHT_POWER_FULL else (0 if v < 0 else v)
+    if ch == -1:
+        for d in light_dacs:
+            d.write(v)
+    elif 0 <= ch < len(light_dacs):
+        light_dacs[ch].write(v)
 
 # ---- 给水泵：软件单脉冲，8 路共用 1 个定时器，脉冲期间不重入（对标 Arduino active_pin 保护）----
 class Pump:

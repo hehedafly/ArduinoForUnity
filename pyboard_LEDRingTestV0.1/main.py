@@ -16,7 +16,7 @@ import micropython
 # 禁用后 0x03 回归普通数据；维护中断改用 exitmain 命令干净退出主循环。
 micropython.kbd_intr(-1)
 from pyb import Pin, ExtInt, DAC, Timer
-from utime import ticks_us, sleep_ms
+from utime import ticks_us, sleep_ms, ticks_ms, ticks_diff
 import gc
 # 堆调优：当已分配堆增长到「空闲的 1/4」时自动触发 GC，抑制 SendBuffer 反复重建
 # bytearray 造成的碎片化——这是“分配 109 字节都失败”这类 OOM 的主因（此前全程未做 GC 调优）。
@@ -27,7 +27,7 @@ gc.threshold(gc.mem_free() // 4 + gc.mem_alloc())
 # ======================================================================
 
 # ---- 硬件层已拆到 hw.py（减小 main.py 编译峰值，避免板载编译 OOM）----
-from hw import pump, og, ms, pump_pins, led_pin, spare_high_pin, set_light_power, light_dac
+from hw import pump, og, ms, pump_pins, led_pin, spare_high_pin, set_light_power, tp_reset_pin
 
 # ---- 传感器中断标志 ----
 lick_flags = [0] * 8
@@ -109,9 +109,11 @@ state = {
     "waterServeManual": -1, "OGActiveMills": 100, "miniscopeRecord": 0,
     "INDEBUGMODE": 0, "lightControl": 0, "tempLickPos": -1,
     "lickEndThresholdMills": -1, "autoStressTest": 0,
+    "touchpannelReset": 0,
 }
 water_flush = [0] * 8
 _exit_main = False   # exitmain 后门标志：置位后主循环干净退出，落回 UART6 REPL
+_tp_reset_until = 0  # 触摸面板复位：0=空闲；否则为 ticks_ms 到期时刻（软件计时，见 _poll_tp_reset）
 
 def _set_exit_main():
     global _exit_main
@@ -143,6 +145,7 @@ def init_by_pc(reset_connect_status=True):
         "tempTrialStatusMark": -1, "waterServeWhenLick": 0,
         "waterServeManual": -1, "OGActiveMills": 100, "miniscopeRecord": 0,
         "tempLickPos": -1, "lickEndThresholdMills": -1,
+        "touchpannelReset": 0,
     })
     for i in range(8):
         water_flush[i] = 0
@@ -151,6 +154,7 @@ def init_by_pc(reset_connect_status=True):
     og.off()
     ms.off_all()
     set_light_power(0)
+    _tp_reset_release()   # 复位线立即回高，绝不留在低电平
     comm.send_buffer.clear()
     if reset_connect_status:
         state["INDEBUGMODE"] = 0
@@ -176,7 +180,7 @@ def print_array_status(head=""):
     comm.push_logical("debugLog:" + head + "; ".join(parts))
 
 def print_status_value():
-    """stv 状态快照打包（见 PYBOARD_STV_HANDOVER.md）：不含 9=waterServeManual，防重连后意外出水。"""
+    """stv 状态快照打包（交接约定见上位机侧文档，本工程不含该文件）：不含 9=waterServeManual，防重连后意外出水。"""
     s = state
     parts = [
         "0={0}".format(s["lick_mode"]),    "1={0}".format(s["trial"]),
@@ -231,7 +235,7 @@ def parse_status_value(body):
         if var_name == "lightControl":
             v = 4096 if val > 4096 else (0 if val < 0 else val)
             state["lightControl"] = v
-            set_light_power(v)
+            set_light_power(v)   # 旧渠道：两路 DAC 同值（需分控用 cmd:lpset）
 
 # ======================================================================
 # 三、命令解析（对标 commandParse + 新文法分发）
@@ -298,6 +302,17 @@ def _cmd_msset(args):
     ms.set(ch, st != 0)
     return True
 
+def _cmd_lpset(args):
+    """cmd:lpset;<ch>;<value>：光功率 DAC 2 路独立设置（0~4095，12-bit）；ch=-1 同值作用所有通道。"""
+    ch = _opt_int(args, 0, None)
+    if ch != -1 and not (0 <= ch < len(config.LIGHT_POWER_DACS)):
+        return False
+    v = _opt_int(args, 1, None)
+    if v is None:
+        return False
+    set_light_power(v, ch)
+    return True
+
 def _parse_new_cmd(body, raw):
     """命令体按 ; split：第一个值为 case（进 switch），其余为顺序参数。"""
     parts = body.split(";")
@@ -309,6 +324,8 @@ def _parse_new_cmd(body, raw):
         ok = _cmd_ogset(args)
     elif case == "msset":
         ok = _cmd_msset(args)
+    elif case == "lpset":
+        ok = _cmd_lpset(args)
     else:
         return   # 其它 case 预留，静默忽略
     if ok:
@@ -418,12 +435,35 @@ def command_parse(cmd):
                 elif var_name == "lightControl":
                     v = 4096 if val > 4096 else (0 if val < 0 else val)
                     s["lightControl"] = v
-                    set_light_power(v)
+                    set_light_power(v)   # 旧渠道：两路 DAC 同值（需分控用 cmd:lpset）
+                elif var_name == "touchpannelReset":
+                    touchpannel_reset(val)   # >0=毫秒低脉冲后回高；pin=None 或 <=0 仅记状态
             return
 
 # ======================================================================
 # 四、主循环（对标 loop）
 # ======================================================================
+
+# ---- 触摸面板复位（软件计时，不阻塞主循环；pin=None 时全程不碰引脚）----
+def _tp_reset_release():
+    global _tp_reset_until
+    _tp_reset_until = 0
+    if tp_reset_pin is not None:
+        tp_reset_pin.high()
+
+def touchpannel_reset(mills):
+    """>0：拉低 mills 毫秒后回高（主循环软件计时）；pin=None 或 <=0 则不动引脚。"""
+    global _tp_reset_until
+    if tp_reset_pin is None or mills <= 0:
+        return False
+    tp_reset_pin.low()
+    _tp_reset_until = ticks_ms() + mills
+    return True
+
+def _poll_tp_reset():
+    global _tp_reset_until
+    if _tp_reset_until and ticks_diff(ticks_ms(), _tp_reset_until) >= 0:
+        _tp_reset_release()
 
 def _poll_sensors():
     for i in range(8):
@@ -492,6 +532,7 @@ def loop():
     _poll_sensors()
     _poll_trial_status()
     _poll_water_manual()
+    _poll_tp_reset()
 
     # 发送队列 -> 串口
     _count = 0
@@ -517,6 +558,8 @@ def setup():
     led_pin.low()
     if spare_high_pin is not None:
         spare_high_pin.high()
+    if tp_reset_pin is not None:
+        tp_reset_pin.high()   # 触摸面板复位线：空闲态=高（低有效）
     set_light_power(0)
     _setup_extints()
 

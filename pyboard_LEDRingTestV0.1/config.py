@@ -19,7 +19,11 @@ else:
     UART_ID = 2             # 用 UART2 (X3/X4)
     UART_BAUD = 250000      # 对应原代码 Serial 的 250000
 
-# ============ 引脚映射（pyBoard Plus 重规划：扩展区 PE 口集中分配） ============
+# ============ 引脚映射（pyBoard Plus 重规划：扩展区 E 组集中分配） ============
+# 扩展区两组（Plus 比原版多引出的 32 个 GPIO）：
+#   E0~E15 = PE0~PE15（本项目泵+舔水全占）；
+#   D0~D15 = PD0~PD15（未分配；D2=SDIO_CMD 已被 SD 卡占；D3~D7 的 EXTI3~7 空闲、可挂中断；
+#                        D8~D15 与舔水同占 EXTI8~15，不可挂中断，只能输出/轮询/走外设）。
 # 设计原则：
 #   - 泵/舔水/其它输出集中到 Plus 板扩展引出的 PE 口，组内 GPIO 号连续、物理相邻。
 #   - 给水为「软件单脉冲」（共享定时器回调），仅需 GPIO，不占定时器通道。
@@ -52,7 +56,7 @@ EXTINT_TABLE = [
     # ("Y?",  "change",         "down", "sync",     0),   # 同步 si:sync
 ]
 
-# 从表派生舔水引脚名列表（单一真相源；供 af_list.py 等旧引用使用）
+# 从表派生舔水引脚名列表（单一真相源；逻辑与诊断按名引用。原 af_list.py 辅助脚本已废弃删除）
 LICK_PINS = [row[0] for row in EXTINT_TABLE if row[3] == "lick"]
 
 # 8 路给水泵（输出，软件单脉冲，共享定时器回调）—— PE0~PE7 连续 8 引脚
@@ -104,17 +108,25 @@ INFRARED_DETECT_PIN = "Y11"   # PB0, EXTI0
 # 压杆检测（ExtInt FALLING，原代码未启用；已预留引脚）
 PRESS_LEVER_PIN = "Y12"       # PB1, EXTI1
 
+# 扩展 D 组（D0~D15 = PD0~PD15）中断说明：D3~D7 的 EXTI3~7 空闲，可直接写进 EXTINT_TABLE；
+# D0/D1 会与上面红外/压杆预留的 EXTI0/1 互斥；D2 引脚被 SD 卡 SDIO_CMD 占；D8~D15 与舔水同占 EXTI8~15，不可挂中断。
+
 # 同步信号输入（ExtInt CHANGE，原代码注释掉，不再预留）
 SYNC_INPUT_PIN = None
 
-# 光功率 DAC（12-bit, 0~3.3V）
-LIGHT_POWER_DAC = 1           # DAC1 = X5 (PA4)
+# 光功率 DAC（12-bit, 0~3.3V）：2 路独立输出
+LIGHT_POWER_DACS = [1, 2]     # DAC1 = X5 (PA4) 光功率0；DAC2 = X6 (PA5) 光功率1
+LIGHT_POWER_FULL = 4095       # 12-bit 满量程（旧渠道 10= 与 cmd:lpset 均按此钳位）
 
 # 板上指示 LED（原代码用 pin 13 做泵工作指示）
 LED_PIN = "LED_RED"           # pyboard 红 LED
 
 # 备用常高引脚：原 Arduino pin 50 恒高的冗余项，按需不分配；确有外部依赖时再从保留引脚中挑一根即可恢复（main.py 已兼容 None）
 SPARE_HIGH_PIN = None
+
+# 触摸面板复位引脚（可选预留）：None=不驱动；设为引脚名（如 "X11"）则初始化即输出高，空闲不复位（低有效）。
+# 触发：写状态量 11（touchpannelReset），>0 表示毫秒数——拉低该时长后回高；<=0 只记状态不动引脚。
+TOUCHPANNEL_RESET_PIN = None
 
 # ============ 软件单脉冲共享定时器（不占用引脚 AF，仅作超时回调） ============
 # 给水泵共用 TIM2（32 位）；TIM5 作 OG PWM 线定时自关超时源；TIM13 作 OG 门控线定时自关超时源（均仅回调，不占通道）。
@@ -153,7 +165,7 @@ CACHE_PREFIXES = ["li", "en", "pr"]
 MAX_CACHE_ENTRIES = 64
 CACHE_STRING_MAX_LEN = 24
 
-# 状态变量索引契约（pointer_array，下标即命令里的变量序号 0~10）
+# 状态变量索引契约（pointer_array，下标即命令里的变量序号 0~11）
 STATE_ORDER = [
     "lick_mode",            # 0
     "trial",                # 1
@@ -166,6 +178,7 @@ STATE_ORDER = [
     "waterServeWhenLick",   # 8
     "waterServeManual",     # 9
     "lightControl",         # 10
+    "touchpannelReset",     # 11  >0=毫秒（拉低该时长后回高）；<=0 不动引脚。stv 快照不含本项
 ]
 
 # 数组类型索引契约（pointerArrayType_array，命令 arr[idx]=value）

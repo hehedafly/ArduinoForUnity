@@ -1,8 +1,13 @@
-# pyBoard Plus 引脚重规划方案（V0.2）
+# pyBoard Plus 引脚重规划方案（V0.4）
 
 > 背景：原工程按 pyboard v1.1（STM32F405RG，LQFP64）规划。现改用 **01Studio pyBoard v1.1 Plus（STM32F407VGT6，LQFP100）**，
 > 利用其扩展引出的 GPIO 重新分配，目标：泵/舔水组内连续、无冗余、省中断资源、留足扩展余量。
 > 本文档为最新定稿，**优先级高于**《迁移评估与实现规划.md》中的旧引脚表。
+> V0.3（2026-10 修订）：确认扩展区为 **D0~D15 + E0~E15 两组**（即 PD0~PD15 / PE0~PE15，共 32 根，与厂商 29→61 GPIO 吻合）；
+> 更正 TIM 占用/空闲清单（TIM13 已被门控自关占用）；光功率改为 **2 路 DAC 并落地 `cmd:lpset`**；
+> 板型标识、deploy 流程描述改为与实现一致；`af_list.py` 已废弃删除。
+> V0.4（2026-10 修订）：预留触摸面板复位 `config.TOUCHPANNEL_RESET_PIN`（默认 `None`）与状态量 `touchpannelReset`
+> （`STATE_ORDER` 索引 **11**，`11=<ms>` 触发毫秒级低脉冲，主循环软件计时；stv 快照不含该项）。
 
 ---
 
@@ -16,7 +21,7 @@
 
 - F405/F407 共用数据手册 DS8626，Table 9 "Alternate function mapping" 按**端口+引脚号**粒度定义；
 - 原有 X1~X12 / Y1~Y12 的 CPU 映射与 AF 复用（定时器/UART/SPI/ADC/DAC）在两块板上**完全一致**；
-- Plus 的"扩展 GPIO"纯粹是 100 脚封装多引出了 64 脚封装没有的引脚（**PE0~PE15 经右侧内排完整引出**），不是重新映射；
+- Plus 的"扩展 GPIO"纯粹是 100 脚封装多引出了 64 脚封装没有的引脚（**PD0~PD15 + PE0~PE15，共 32 根**，丝印 **D0~D15 / E0~E15**，经右侧内排引出），不是重新映射；
 - F407 多出的 Ethernet/DCMI/HASH 外设不改变已有引脚的复用功能，本项目零影响。
 
 **板上已占用、规划时避开的资源**：
@@ -39,7 +44,7 @@
 1. 给水泵 8 路、舔水 8 路各自**组内连续**（GPIO 号连续、物理相邻）；
 2. 其他输出（OG、miniscope 等）不需要高精度、不需要定时器通道直驱（软件单脉冲即可）；
 3. 舔水检测**每根引脚同时挂 RISING + FALLING 中断**（`IRQ_RISING_FALLING`），REACH/LEAVE 共用一根引脚，省引脚省资源；**默认全下拉**（`PULL_DOWN`，空闲钉低=LEAVE，抗悬空/长导线噪声）；
-4. 不做冗余预留，只给红外、压杆留了位置；其余资源全部留给后续扩展。
+4. 不做冗余预留，只给红外、压杆留了位置；其余资源全部留给后续扩展（**含扩展 D 组 D0~D15，全部未分配**，见第四、五节）。
 
 ---
 
@@ -50,16 +55,18 @@
 | 给水泵 0~7 | E0~E7 | PE0~PE7 | GPIO 输出，软脉冲（TIM2 共享回调） | 启用 |
 | 舔水 0~7 | E8~E15 | PE8~PE15 | ExtInt，RISING+FALLING 双沿（EXTI8~EXTI15），PULL_DOWN | 启用 |
 | OG PWM0 | Y3 | PB8 | TIM10_CH1，硬件 PWM（承接原 OGActiveMills 定时脉冲语义，TIM5 做自动关断超时） | 启用 |
-| OG PWM1 | Y4 | PB9 | TIM11_CH1，硬件 PWM（频率与 PWM0 独立，协议命令待扩展） | 启用 |
+| OG PWM1 | Y4 | PB9 | TIM11_CH1，硬件 PWM（频率与 PWM0 独立；`cmd:ogpwm` 的 ch1 与 ch=-1 已支持） | 启用 |
 | OG 高低信号 | X1 / X2 | PA0 / PA1 | GPIO 高/低（UART4 预留随之释放） | 启用 |
 | miniscope 记录触发 | Y9 | PB10 | GPIO 高/低（`MS_RECORD_PINS` 列表结构模仿 OG，当前单通道；只响应开/关、不做定时） | 启用 |
 | 红外门控（进场） | Y11 | PB0 | EXTI0，双沿（高=In/低=leave）；接线后于 EXTINT_TABLE 取消注释启用 | 预留 |
 | 压杆检测 | Y12 | PB1 | EXTI1，FALLING；接线后于 EXTINT_TABLE 取消注释启用 | 预留 |
-| 光功率0 | X5 | PA4 | DAC1，12-bit 0~3.3V（硬件固定，无选择） | 启用 |
-| 光功率1 | X6 | PA5 | DAC2，12-bit 0~3.3V（硬件固定，无选择） | 启用 |
+| 光功率0 | X5 | PA4 | DAC1，12-bit 0~3.3V（`config.LIGHT_POWER_DACS[0]`；硬件固定，无选择） | 启用 |
+| 光功率1 | X6 | PA5 | DAC2，12-bit 0~3.3V（`config.LIGHT_POWER_DACS[1]`；`cmd:lpset` 独立控制，旧渠道 `10=` 两路同值） | 启用 |
 | 泵工作指示 | LED_RED | — | 板载红 LED | 启用 |
 | 备用常高 | — | — | 原 Arduino pin 50 恒高属冗余项，**不分配**（`SPARE_HIGH_PIN = None`，main.py 已兼容） | 取消 |
 | 同步信号输入 | — | — | 原代码注释掉，不预留 | 取消 |
+| 触摸面板复位 | `TOUCHPANNEL_RESET_PIN`（默认 None） | — | GPIO 输出（低有效）：初始化即高；`11=<ms>` 拉低指定毫秒后回高 | 预留 |
+| 扩展 D 组 | D0~D15 | PD0~PD15 | 全部未分配（D2=SDIO_CMD 已被 SD 卡占；D0/D1 与 EXTI0/1 预留同线；D3~D7 可挂中断；D8~D15 EXTI 被舔水占） | 预留 |
 | REPL | UART6（Y1=PC6 / Y2=PC7） | — | boot.py / main.py 的 `os.dupterm` | 维持 |
 
 **舔水语义变化**：原实现中 "lick 0 的 LEAVE 借用 lick 1 引脚 FALLING" 已废弃。
@@ -79,7 +86,7 @@
 | 通道号 | lick 用 0~7；其余传 0 | 上报 `li:<ch>:<reach>` 的 ch |
 
 - 当前 8 行舔水启用（E8~E15，双沿 + 下拉）；红外/压杆/同步行已写好但**注释**，接线后取消注释即生效，无需改 `main.py`；
-- `LICK_PINS` 由表派生（单一真相源，供 af_list.py 诊断扫描）；
+- `LICK_PINS` 由表派生（单一真相源，逻辑与诊断按名引用；原 `af_list.py` 辅助脚本已废弃删除）；
 - **只改「上下拉」那一格**即可把某脚从 `down` 换 `up`/`none`，以匹配不同传感器极性（开漏型必须 `up`）。
 
 **OG 重构（2026-09，二次定稿）**：**2 路硬件 PWM 线（Y3=TIM10_CH1 / Y4=TIM11_CH1，单通道定时器，频率天然独立）+ 2 路门控线（X1/X2，普通 GPIO）**；
@@ -96,12 +103,16 @@ PWM 线默认全高，调制参数仅由 `cmd:ogpwm` 修改；门控线仅由 `c
   新文法靠“首冒号前缀 == cmd”识别，与旧串形状不冲突（旧命令串不含冒号）。
 - 参数通用规则：缺失→默认值；存在但非数值→整条静默丢弃；执行成功回明文 `echo:<原命令>:echo`，
   `INDEBUGMODE>0` 时追加 `debugLog` 状态帧。
-- 板型标识：上电/重握手 init 完成后、首条 `initialed:<VERSION>` 之前，明文发送两遍 `pyboardV1.1Plus`
-  （`config.BOARD_BANNER`，每行带 \r\n），供上位机识别板型。
+- 状态量 `touchpannelReset`（索引 **11**）：`11=<ms>` 且 ms>0 时把 `TOUCHPANNEL_RESET_PIN` 拉低 ms 毫秒后回高
+  （主循环软件计时，不阻塞上报/收帧；重复下发=重新计时）；ms<=0 或该脚为 `None`（默认）时只记状态、不碰硬件。
+  **stv 快照与重连回放不涉及索引 11**（回放只恢复数值、不触发脉冲），重连协议格式零变化。
+- 板型标识：握手期间每 500ms 明文发送一行 `pyboardV1.1Plusinitialed:<VERSION>`
+  （`comm.handshake_loop` 把 `config.BOARD_BANNER` 直接拼在 `initialed:` 前，单行 + \r\n），直到收到 `ACK`；
+  上位机按行判 `initialed:` 前缀，板型标识即该行前缀（**不是**独立的 banner 行）。
 - 维护后门 `exitmain`（关键字命令，帧或 `//` 明文均可）：干净退出主循环、恢复 Ctrl-C、落回 UART6 REPL，
   供 deploy/调试接管；成功先回 `echo:exitmain:echo`。
 
-### 光遗传命令规格（`ogpwm` / `ogset`，供 C# 端对照）
+### 光遗传/光功率命令规格（`ogpwm` / `ogset` / `msset` / `lpset`，供 C# 端对照）
 
 ```
 cmd:ogpwm;<ch>;<freqHz>;<duty%>;<timeMs>
@@ -131,6 +142,22 @@ cmd:ogset;<ch>;<timeMs>
 | 1 | ch | 0/-1（-1 = 所有通道），越界 return |
 | 2 | state | 整数；0=关，非 0=开；缺失/非数值整条丢弃 |
 
+**lpset**（光功率 DAC 2 路独立设置；只动 X5/X6 的 DAC，不影响 OG 的 PWM/门控线）：
+
+```
+cmd:lpset;<ch>;<value>
+```
+
+| 序 | 参数 | 规则 |
+|---|---|---|
+| 1 | ch | 0/1/-1（-1 = 所有通道），缺失或其他值 return |
+| 2 | value | 0~4095（12-bit，`LIGHT_POWER_FULL`）clamp；缺失/非数值整条丢弃 |
+
+- 旧渠道 `10=<v>`（lightControl）语义不变：一次写**两路** DAC（保持原"单一光功率"行为），状态量仍只记一个 `lightControl`；
+  需要两路不同值时用 `cmd:lpset;0;<v>` / `cmd:lpset;1;<v>`。
+
+**四类命令共同的实现约定**：
+
 - 定时自关分工：PWM 线用 TIM5（单实例，新脉冲覆盖旧倒计时）；门控线用独立 TIM13，互不互踩；
   ch=-1 的定时自关以“全局倒计时”标记（内部 -2）作用所有通道；**全局倒计时存续期间若下发单通道开/关命令，
   剩余倒计时移交给未被动的那路**（单实例无法同时跟踪两路）；
@@ -149,13 +176,17 @@ cmd:ogset;<ch>;<timeMs>
 ## 四、资源冲突核查（已通过）
 
 - **EXTI 线**：舔水占 EXTI8~15；红外/压杆将来占 EXTI0/EXTI1；泵（GPIO 号 0~7）无中断 → 互不冲突；
+  扩展 D 组的同号脚（D0/D1=PD0/PD1）若挂中断会与红外/压杆预留的 EXTI0/1 互斥（见下方速查表）；
 - **红外/压杆为什么不用 Y9/Y10**：EXTI 线按 GPIO 编号跨端口共享，舔水 E8~E15 已占满 EXTI8~15，
   而 Y9=PB10→EXTI10、Y10=PB11→EXTI11，分别与 lick2(PE10)/lick3(PE11) 冲突。
   故中断类输入只能落在空闲编号（0/1 → Y11=PB0/Y12=PB1）；X1/X2 现为 OG 高低信号（仅输出，不注册 EXTI，不占 EXTI0/1 线）；
-- **定时器**：TIM2（泵软脉冲超时）、TIM10（OG PWM0）、TIM11（OG PWM1）已被占用；TIM5 作 PWM0 定时关断的超时回调，
-  **每次触发重设频率，整颗不可再挂 PWM**，其通道脚（X1~X4 的 TIM5、X1/X2/Y9/Y10 的 TIM2）永远不能做 PWM；
+- **定时器**：TIM2（泵软脉冲超时）、TIM5（PWM 线定时自关）、TIM10（OG PWM0）、TIM11（OG PWM1）、TIM13（门控线定时自关）
+  已被占用；TIM5/TIM13 均用 `prescaler/period` 一次性闹钟（1kHz tick，**不再是**旧的 `freq=round(1000/ms)`），
+  故这两颗整颗不可再挂 PWM：其通道脚 —— TIM5：X1~X4（PA0~PA3）；TIM2：X1/X2（PA0/PA1）、X6（PA5）、Y9/Y10（PB10/PB11）、X17（PB3）
+  —— 都不能再作为这两颗定时器的 PWM 通道；
+  但这只锁这两颗定时器，**其它定时器通道不受影响**（X7=PA6 可走 TIM3_CH1、X8=PA7 可走 TIM3_CH2/TIM14_CH1；X6 已作 DAC2，见第三节）；
   TIM10/11 为单通道定时器，无残留通道；OG 改挂 TIM10/11 后 **TIM3、TIM9 重新释放**；
-  完全空闲的硬件直驱资源：TIM1/3/4/8/9/12/13/14 及对应引脚通道。
+  完全空闲的硬件直驱资源：TIM1/3/4/8/9/12/14（另有 TIM6/TIM7 基本定时器，无通道）及对应引脚通道。
 - **REPL**：UART6 用 Y1=PC6/Y2=PC7，未被其他功能占用；
 - **泵/舔水同占 GPIO 号 0~7 / 8~15**：分属 PE0~PE7 与 PE8~PE15，EXTI 线不共享，无冲突。
 
@@ -163,32 +194,38 @@ cmd:ogset;<ch>;<timeMs>
 
 EXTI 按**引脚编号**（非端口、非物理位置）分配，共 16 条，同编号跨端口互斥。
 舔水 E8~E15 已占满 EXTI8~15，故 **编号 8~15 的引脚（Y3~Y10 等）永远不能再挂中断**。
+预留提醒：`TOUCHPANNEL_RESET_PIN` 现为 `None`（不占任何脚）。将来指定到某根 EXTINT 候选脚（X3/X4/X7/X8/X11/X12、D3~D7）时，
+该脚要作输出用，须从本表对应行划掉并注明"已作触摸复位输出、不注册中断"（同 X1/X2 作 OG 输出的处理）。
 
 | EXTI 线 | 候选（同线只能选一个） | 状态 |
 |---|---|---|
-| 0 | X1(PA0) / X19(PC0) / Y11(PB0) | Y11 预留给红外；X1 为 OG 输出，未注册中断，不占线 |
-| 1 | X2(PA1) / X20(PC1) / Y12(PB1) | Y12 预留给压杆；X2 为 OG 输出，同上 |
-| 2 | X3(PA2) / X21(PC2) | 空闲（二选一） |
-| 3 | X4(PA3) / X22(PC3)（X17=PB3 也在此线，但被板载 USR 键占用） | 空闲（二选一） |
-| 4 | X11(PC4) | 空闲 |
-| 5 | X6(PA5) / X12(PC5) | 空闲（二选一；X6 另有 DAC2 可选） |
-| 6 | X7(PA6) / Y1(PC6) | Y1 被 REPL(UART6) 占，X7 空闲（UART 不配 EXTI，不影响 X7） |
-| 7 | X8(PA7) / Y2(PC7) | Y2 被 REPL 占，X8 空闲（同上，UART 不配 EXTI） |
-| 8~15 | 全部被舔水占用（X18=PC13 的 EXTI13 也在其中） | 不可用 |
+| 0 | X1(PA0) / X19(PC0) / Y11(PB0) / D0(PD0) | Y11 预留给红外；X1 为 OG 输出、D0 未分配，均未注册中断，不占线 |
+| 1 | X2(PA1) / X20(PC1) / Y12(PB1) / D1(PD1) | Y12 预留给压杆；X2 为 OG 输出、D1 未分配，同上 |
+| 2 | X3(PA2) / X21(PC2) / D2(PD2) | X3、X21 空闲（二选一）；D2 是 SDIO_CMD，引脚已被 SD 卡占用 |
+| 3 | X4(PA3) / X22(PC3) / D3(PD3)（X17=PB3 也在此线，但被板载 USR 键占用） | X4、X22、D3 空闲（三选一） |
+| 4 | X11(PC4) / X5(PA4) / D4(PD4) | X11、D4 空闲（二选一）；X5 为 DAC1 光功率0 输出，不注册中断 |
+| 5 | X12(PC5) / X6(PA5) / D5(PD5) | X12、D5 空闲（二选一）；X6 为 DAC2 光功率1 输出，不注册中断 |
+| 6 | X7(PA6) / Y1(PC6) / D6(PD6) | Y1 被 REPL(UART6) 占；X7、D6 空闲（二选一；UART 不配 EXTI，不影响 X7） |
+| 7 | X8(PA7) / Y2(PC7) / D7(PD7) | Y2 被 REPL 占；X8、D7 空闲（同上，UART 不配 EXTI） |
+| 8~15 | 全部被舔水占用（E8~E15；X18=PC13 的 EXTI13、扩展 D 组的 D8~D15 也在这几条线上） | 不可用 |
 
 ### 中断能力与扩展总览（2026-08 盘点）
 
-**可自由挂中断**（EXTI 线空闲，互斥对子内各选其一）：
-X3、X4、X11、X7、X8；同线候补：X21（与 X3 同 EXTI2）、X22（与 X4 同 EXTI3）、X12（与 X6 同 EXTI5）。
+**可自由挂中断**（EXTI 线空闲，同线内各选其一）：
+X3、X4、X7、X8、X11、X12，以及扩展 D 组的 **D3~D7**（其中 D4/D5/D6/D7 分别与 X11/X12/X7/X8 同线，二选一）；
+同线候补：X21（与 X3 同 EXTI2）、X22（与 X4 同 EXTI3）。
 另有 Y11/Y12 为红外/压杆预留（EXTI0/1），接线后启用。
 X1/X2 现作 OG 高低信号输出，不注册中断（EXTI 只在注册 ExtInt 时互斥，故不影响 Y11/Y12 预留）。
+**扩展 D 组（D0~D15 = PD0~PD15）**：D0/D1 一挂中断即占 EXTI0/1（与红外/压杆预留互斥）；D2 引脚被 SD 卡 SDIO_CMD 占；
+**D3~D7 可直接挂中断**（EXTI3~7 空闲）；**D8~D15 因舔水占满 EXTI8~15 永远挂不了中断**，只能输出/轮询或走外设
+（D0/D1=CAN1、D5/D6=USART2 TX/RX、D12~D15=TIM4_CH1~4 可 PWM；D3~D7 无定时器通道）。
 **REPL 不占中断线**：UART 外设不配置 EXTI，只占 Y1/Y2 引脚本身；因此 Y1/Y2 留给 REPL 时，
 同线的 X7（EXTI6）、X8（EXTI7）照样可挂中断；反过来若把 REPL 从 UART6 挪走，Y1/Y2 也可挂中断（与 X7/X8 仍是同线二选一）。
 注意：E0~E7（泵）虽是编号 0~7 的脚，但仅作 GPIO 输出、不注册 ExtInt，**不占用** EXTI0~7 线，不构成上述限制。
 另：同一根脚做 ADC（模拟模式）时不能同时注册 ExtInt，两者按脚分工；但 ADC 不占 EXTI 线，不影响别的脚挂中断（如 X21/X22 采 ADC 与 X3/X4 挂中断互不干扰）。
 
 **永远挂不了中断**（编号 8~15，EXTI8~15 被舔水永久占满）：
-Y3~Y10、Y5~Y8 及任何编号 8~15 的脚，只能轮询输入、输出或走总线外设（SPI2/I2C2/TIM 通道等）。
+Y3~Y10（PB8~PB15）、X18(PC13)、扩展 D 组的 D8~D15，以及任何编号 8~15 的脚，只能轮询输入、输出或走总线外设（SPI2/I2C2/TIM 通道等）。
 
 **边缘/不推荐**：
 - X17（PB3）：板载 USR 按键占用，且为 SWO 调试脚；EXTI3 与 X4 同线；不当普通 GPIO 用；
@@ -206,13 +243,14 @@ Y5~Y8 本就挂不了中断，X9/X10 的 EXTI6/7 虽空闲但 I2C 用不到 → 
 | Y5~Y8（PB12/PB13/PB14/PB15） | **SPI(2) 总线预留**：NSS=Y5, SCK=Y6, MISO=Y7, MOSI=Y8（pyboard 官方 SPI2，四脚连续别无他选）；Y7/Y8 另有 TIM12 通道 |
 | X9/X10（PB6/PB7） | **I2C(1) 预留**：SCL=X9, SDA=X10；加速度计 MMA7660（地址 0x4C）同总线，加挂器件避开此地址即可 |
 | X3（PA2） | 空闲（上一版 OG PWM 释放）；TIM9_CH1 可 PWM（TIM2/5 通道已锁）；EXTI2 |
-| X7（PA6） | 空闲（上一版 OG PWM 释放）；TIM3_CH1/TIM13 可 PWM；EXTI6 |
+| X7（PA6） | 空闲（上一版 OG PWM 释放）；TIM3_CH1 可 PWM（**TIM13 已被门控自关占用**）；EXTI6 |
 | Y10（PB11） | 空置；普通 GPIO；EXTI11 被舔水占，仅输出/轮询；带 TIM2_CH4（已锁）、I2C2 |
 | Y1/Y2（PC6/PC7） | 现被 REPL(UART6) 占用，必要时可挪走 |
 | X4（PA3） | 空闲；带 TIM9_CH2（TIM9 已随 OG 迁走重新空闲，可自由用）、TIM5 通道已锁；EXTI3 |
-| X6（PA5） | 空闲；带 TIM8_CH1 可 PWM；DAC2 可选（二选一）；EXTI5 |
+| X6（PA5） | **已占用：DAC2 光功率1 输出**（`LIGHT_POWER_DACS[1]`；与 PWM/中断互斥，上一版"空闲 / EXTI5 候选"作废） |
 | X8（PA7） | 空闲；带 TIM3_CH2（TIM3 已随 OG 迁走重新空闲，可自由用）、TIM14；EXTI7 |
-| X11/X12（PC4/PC5） | 空闲，普通 GPIO；无定时器通道（不能 PWM）；EXTI4 / EXTI5（与 X6 同线） |
+| X11/X12（PC4/PC5） | 空闲，普通 GPIO；无定时器通道（不能 PWM）；EXTI4 / EXTI5（分别与 D4 / D5 同线；X5/X6 已作 DAC 输出） |
+| D0~D15（PD0~PD15） | **Plus 扩展区第二组（丝印 D0~D15）**，与 E 组同属新增 32 GPIO：D2=SDIO_CMD 已被 SD 卡占；D0/D1 未分配（CAN1；其 EXTI0/1 与红外/压杆预留同线）；**D3~D7 空闲、可挂中断**（EXTI3~7）；D8~D15 未分配但 EXTI8~15 被舔水占满，只能输出/轮询/走外设；D5/D6=USART2 TX/RX；D12~D15=TIM4_CH1~4 可 PWM；D0~D11 无定时器通道 |
 | X19~X22（PC0~PC3） | **空闲，未分配**；原版板为 shielded 模拟输入（焊盘包地屏蔽，适合高阻抗传感器）；ADC123_IN10~13；**无定时器通道，不能 PWM**；X19/X20 的 EXTI0/1 与红外/压杆预留同线，X21/X22 的 EXTI2/3 与 X3/X4 同线；Plus 板是否保留屏蔽铜皮需看实物 |
 | X17（PB3） | 板载 USR 按键 + SWO 调试脚，不分配 |
 | X18（PC13） | 输出限 3mA 且 EXTI13 被舔水占线，仅可弱轮询输入，不分配 |
@@ -223,19 +261,20 @@ Y5~Y8 本就挂不了中断，X9/X10 的 EXTI6/7 虽空闲但 I2C 用不到 → 
 
 | 文件 | 是否改动 | 内容 |
 |---|---|---|
-| `config.py` | ✅ 已改 | 新引脚表；红外/压杆预留；备用常高/同步取消；OG 二次定稿为 Y3/Y4 PWM 线 + X1/X2 门控线，miniscope 移至 Y9，Y10 空置；ogpwm 钳位常量（freq 1~5000、duty 1~100）与默认值（20Hz/50%）；新增 `OG_GATE_TIMER=13`；`MS_RECORD_PIN` 改列表 `MS_RECORD_PINS` |
-| `main.py` | ✅ 已改（本轮 MS 重构+OG 精确化） | 舔水 8 路双沿单回调；OG 类 PWM 线/门控线模型（含 ch=-1 全通道）；OG 定时改 prescaler/period 精确一次性闹钟（TIM13 >65.5s 退化 10Hz 计数）；新增 MS 类（多通道结构、只开关）与 `cmd:msset` case；旧渠道变量 6/7 分别映射 OG ch0 全高 / MS ch0；`micropython.kbd_intr(-1)`；`exitmain` 后门 |
-| `comm.py` | ❌ 无需 | 纯通讯层，与引脚无关 |
+| `config.py` | ✅ 已改 | 新引脚表；红外/压杆预留；备用常高/同步取消；OG 二次定稿为 Y3/Y4 PWM 线 + X1/X2 门控线，miniscope 移至 Y9，Y10 空置；ogpwm 钳位常量（freq 1~5000、duty 1~100）与默认值（20Hz/50%）；新增 `OG_GATE_TIMER=13`；`MS_RECORD_PIN` 改列表 `MS_RECORD_PINS`；光功率改 2 路 `LIGHT_POWER_DACS=[1,2]` + `LIGHT_POWER_FULL=4095`；注释补扩展 D 组中断说明；新增 `TOUCHPANNEL_RESET_PIN=None`（预留）+ `STATE_ORDER` 追加索引 11 `touchpannelReset` |
+| `hw.py` | ✅ 已改 | 硬件驱动层（Pump/OG/MS/DAC/输出引脚），从 main.py 拆出以降低板载编译峰值；`light_dacs` 2 路 + `set_light_power(v, ch=-1)`；`tp_reset_pin`（配置为 None 时跳过、不驱动；非 None 时 import 即置高） |
+| `main.py` | ✅ 已改（本轮 MS 重构+OG 精确化+DAC2+触摸复位预留） | 舔水 8 路双沿单回调；OG 类 PWM 线/门控线模型（含 ch=-1 全通道）；OG 定时改 prescaler/period 精确一次性闹钟（TIM13 >65.5s 退化 10Hz 计数）；`cmd:msset` / `cmd:lpset` case；旧渠道变量 6/7/10 分别映射 OG ch0 全高 / MS ch0 / 两路 DAC 同值；`touchpannelReset` 走主循环软件计时低脉冲（`_poll_tp_reset`，不占定时器、不阻塞循环），`init_by_pc` 时立即释放回高；`micropython.kbd_intr(-1)`；`exitmain` 后门。Pump/OG/MS/DAC 类体已移至 hw.py |
+| `comm.py` | ❌ 无需 | 纯通讯层，与引脚无关；板型标识的实际行为以此文件为准（见第三节命令文法约定） |
 | `boot.py` | ❌ 无需 | 仅 REPL 迁移到 UART6 |
-| `af_list.py` | ❌ 无需 | 开发辅助脚本（非部署）；新方案泵/舔水不依赖定时器通道，无需再做 AF 建议 |
+| `af_list.py` | 🗑 已废弃删除 | 开发辅助脚本，引脚方案定稿后不再维护；原脚本仍引用已删除的 `config.OG_PIN`（一跑就 AttributeError），且把 X11/X12 误记成 PB4/PB5，保留只会误导 |
 
 ---
 
 ## 七、上板注意事项
 
-1. **引脚命名**：`Pin("E0")` 是否可用取决于 Plus 固件的引脚定义表。若报 `ValueError`：
-   - 改用 CPU 名：`pyb.Pin.cpu.E0`；或
-   - 自定义别名：`pyb.Pin.dict({"E0": pyb.Pin.cpu.E0, ...})`。
+1. **引脚命名**：`Pin("E0")` / `Pin("D3")` 是否可用取决于 Plus 固件的引脚定义表（E 组=PE0~PE15，D 组=PD0~PD15）。若报 `ValueError`：
+   - 改用 CPU 名：`pyb.Pin.cpu.E0` / `pyb.Pin.cpu.D3`；或
+   - 自定义别名：`pyb.Pin.dict({"E0": pyb.Pin.cpu.E0, "D3": pyb.Pin.cpu.D3, ...})`。
    只需改 `config.py` 里的名字（或统一加一段别名注册），逻辑代码不受影响。
 2. **固件**：必须使用 01Studio 面向 pyBoard Plus（STM32F407VGT6）的 MicroPython 固件，勿刷原版 PYBV11（F405RG）固件。
 3. **验证顺序建议**：先跑通 `Pin("E0")` 类命名的冒烟测试 → 示波器/万用表验证泵脉冲（`pulse_width` 等价 10ms 高）→ 舔水双沿上报（`li:i:1` / `li:i:0`）→ 握手联调。
@@ -243,4 +282,11 @@ Y5~Y8 本就挂不了中断，X9/X10 的 EXTI6/7 虽空闲但 I2C 用不到 → 
 5. **带内 0x03 危害与对策（2026-09 事故定案）**：STM32 MicroPython 的 USB VCP 接收路径对每个入站字节做中断字符（Ctrl-C=0x03）检查，与 dupterm 是否在 UART6 无关；
    上位机帧中作为普通数据出现的 0x03（典型：`6=0`/`7=0` 等 3 字节 content 的**长度字节**，Unity 退出时 CloseDevices 必发）会异步触发 KeyboardInterrupt，打穿 main.py 并软复位，且该 0x03 字节被吞导致当帧丢失。
    对策：main.py 启动即 `micropython.kbd_intr(-1)`，0x03 回归普通数据；维护中断改用明文/帧命令 `exitmain`（干净退出主循环落回 UART6 REPL 并恢复 Ctrl-C）。
-   **deploy 流程变更**：`deploy*.ps1` 开头的 0x03 打断步骤对业务运行中的板子已失效，改为先发 `//exitmain` 等 REPL 提示符出现后再传文件。
+   **deploy 流程（⚠ 待实施，脚本尚未改）**：现行 `deploy*.ps1` / `repl*.ps1` / `tools/deploy_test.py` 仍是开场发 0x03 打断 —— 对业务运行中的板子已失效（0x03 已被 `kbd_intr(-1)` 当普通数据吃掉）。
+   目标流程：先发明文 `//exitmain` → 等 UART6 REPL 出现 `>>>` 提示符 → 再传文件；改动落在上述脚本的开场打断步骤。
+6. **触摸面板复位（预留，默认不接）**：现 `TOUCHPANNEL_RESET_PIN = None`，此时 `11=<ms>` 只写状态、不碰硬件；
+   接线时把该配置改成一根空闲脚（建议 X11 或 D3~D7），并按 §七.1 确认固件认这个引脚名。
+   验证：上电该脚为高 → 发 `11=500` 示波器量低电平约 500ms 后回高 → 再发同值可重复触发 → `11=0` 不动引脚
+   → 脉冲中途 `clear`/`forceinit` 立即回高 → 断线重连 stv 回放无脉冲；同时把该脚从 §四 EXTI 速查表划掉。
+   注：引脚名写错会在 `hw.py` import 时直接抛异常（main 起不来、落回 REPL）——这是有意保留的失败可见性；
+   若希望坏名字只静默禁用该功能，把 `hw.py` 那段包进 `try/except` 即可（同 `spare_high_pin` 的写法）。
